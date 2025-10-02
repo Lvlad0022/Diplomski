@@ -5,7 +5,6 @@ import random
 import time
 import traceback
 
-from torch.optim.lr_scheduler import ExponentialLR
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -46,7 +45,12 @@ class QTrainer:
         self.gamma = gamma
         self.model = model
         self.model_target = model_target
-        self.optimizer = optim.Adam(model.parameters(), lr=self.lr)
+        self.optimizer = optim.Adam([
+                {'params': self.model.backbone.parameters(), 'lr': 5e-5},  # Pretrained
+                {'params': self.model.metadata_fc_layers.parameters()},
+                {'params': self.model.combined_fc_layers.parameters()},
+                {'params': self.model.output_layer.parameters()}
+            ], lr=5e-4)  # Faster LR for new layers
         self.criterion = nn.MSELoss() # Mean Squared Error Loss
         self.scheduler = None
         if scheduler:
@@ -115,43 +119,26 @@ class QTrainer:
             self.model_target_counter = 0
             self.model_target.load_state_dict(self.model.state_dict())
 
+from torchvision import models
+
 class AdvancedSnakeNN(nn.Module):
-    def __init__(self, ):
-        map_height = 60
-        map_width = 60
-        metadata_dim = 37
-        num_actions = 4
-        map_channels = 3
+    def __init__(self):
         super(AdvancedSnakeNN, self).__init__()
-        self.conv_layers = nn.Sequential(
-            # Layer 1: Conv -> ReLU -> MaxPool
-            nn.Conv2d(map_channels, 32, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2), # Reduces spatial dimensions by half
 
-            # Layer 2: Conv -> ReLU -> MaxPool
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2), # Reduces spatial dimensions by half
+        map_height = 25
+        map_width = 60
+        metadata_dim = 38
+        num_actions = 4
 
-            # Layer 3: Conv -> ReLU
-            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
+        # Pretrained ResNet18 (remove final FC layer)
+        resnet = models.resnet18(pretrained=True)
+        self.backbone = nn.Sequential(*list(resnet.children())[:-1])  # Remove last FC layer
+        self.backbone_output_size = resnet.fc.in_features  # Usually 512
 
-            # Layer 4: Conv -> ReLU
-            nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-        )
+        # Resize your map input to 3x224x224 for ResNet
+        self.input_resizer = nn.Upsample(size=(224, 224), mode='bilinear', align_corners=False)
 
-        # Calculate the size of the flattened output from the convolutional layers
-        # We need to pass a dummy tensor through the conv layers to figure this out
-        self._dummy_input = torch.randn(1, map_channels, map_height, map_width)
-        self._conv_out_size = self._get_conv_out_size(self._dummy_input)
-        
-
-        # --- Fully Connected Layers for Metadata Processing ---
-        # These layers process the non-spatial metadata.
-        # We use 2 FC layers for metadata initially (part of the 4 total FC layers)
+        # Metadata processing
         self.metadata_fc_layers = nn.Sequential(
             nn.Linear(metadata_dim, 64),
             nn.BatchNorm1d(64),
@@ -159,48 +146,29 @@ class AdvancedSnakeNN(nn.Module):
             nn.Linear(64, 256),
             nn.BatchNorm1d(256),
             nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
         )
-        self._metadata_fc_out_size = 256 # Output size of the metadata FC layers
+        metadata_out = 256
 
-        # --- Fully Connected Layers for Combined Features ---
-        # These layers combine the flattened CNN output and the metadata FC output.
-        # We use the remaining 2 FC layers here.
-        self._combined_input_size = self._conv_out_size + self._metadata_fc_out_size
+        # Combined layers
         self.combined_fc_layers = nn.Sequential(
-            nn.Linear(self._combined_input_size, 256),
+            nn.Linear(self.backbone_output_size + metadata_out, 256),
             nn.BatchNorm1d(256),
             nn.ReLU(),
             nn.Linear(256, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(),
         )
-        self._combined_fc_out_size = 128 # Output size of the combined FC layers
 
-        # --- Output Layer ---
-        # This layer produces the final output (e.g., action probabilities).
-        self.output_layer = nn.Linear(self._combined_fc_out_size, num_actions)
-
-    def _get_conv_out_size(self, x):
-        out = self.conv_layers(x)
-        return out.view(out.size(0), -1).size(1)
+        self.output_layer = nn.Linear(128, num_actions)
 
     def forward(self, map_input, metadata_input):
-        map_input = map_input.to(DEVICE)
-        metadata_input = metadata_input.to(DEVICE)
+        map_input = self.input_resizer(map_input)  # Resize for ResNet
+        x = self.backbone(map_input).view(map_input.size(0), -1)
+        metadata = self.metadata_fc_layers(metadata_input)
+        combined = torch.cat([x, metadata], dim=1)
+        x = self.combined_fc_layers(combined)
+        return self.output_layer(x)
 
-        conv_features = self.conv_layers(map_input)
-        conv_features_flat = conv_features.view(conv_features.size(0), -1)
-        metadata_features = self.metadata_fc_layers(metadata_input)
-        combined_features = torch.cat((conv_features_flat, metadata_features), dim=1)
-        combined_fc_out = self.combined_fc_layers(combined_features)
-
-        # Pass the result through the output layer
-        output = self.output_layer(combined_fc_out)
-
-        return output
     def save(self, file_name='model.pth'):
         model_folder_path = './model'
         if not os.path.exists(model_folder_path):
@@ -208,12 +176,23 @@ class AdvancedSnakeNN(nn.Module):
 
         file_name = os.path.join(model_folder_path, file_name)
         torch.save(self.state_dict(), file_name)
+    
+    def freeze_backbone(self, freeze=True):
+        """
+        Freezes or unfreezes the EfficientNet backbone.
+
+        Args:
+            freeze (bool): If True, freeze all backbone layers (no gradient update).
+                           If False, unfreeze (allow training).
+        """
+        for param in self.backbone.parameters():
+            param.requires_grad = not freeze
 
 
 
 # --- Constants ---
 MAX_MEMORY = 100_000
-BATCH_SIZE = 32
+BATCH_SIZE = 16
 LR = 0.0005
 
 # --- Item and Move Mappings ---
@@ -270,6 +249,7 @@ class Agent:
 
         # --- Use the AdvancedSnakeNN model --
         self.model = AdvancedSnakeNN().to(DEVICE)
+        self.model.freeze_backbone(True)
         self.model_target = AdvancedSnakeNN().to(DEVICE)
         # Obavezno sinkronizirajte težine na početku!
         self.model_target.load_state_dict(self.model.state_dict())
@@ -416,6 +396,7 @@ class Agent:
         winner = data.get("winner")
 
         if winner is not None:
+            self.n_games = self.n_games+1
             if winner == self.player1_name:
                 reward = 1  # Velika nagrada za pobjedu
             else:
@@ -433,8 +414,8 @@ class Agent:
             move_count = data.get("moveCount", 0)
 
             # Izračunaj bodovnu prednost, sada pomnoženu s faktorom hitnosti
-            reward = (score1diff - score2diff) * 0.00003
-            reward += 0.01 * (move_count/900)
+            reward = (score1diff - score2diff) * 0.0001
+            reward += 0.01 
         # ... (logika za 'survived' i return) ...
         return reward
 
@@ -448,13 +429,14 @@ class Agent:
         Returns:
             tuple: (metadata_array, map_array)
         """
-        map_height = 60
+        map_height = 25
         map_width = 60
         map_json = data["map"]
         players_json = data["players"]
-        game_info = data # Contains moveCount, isGameOver, winner, etc.
+        game_info = data 
 
-        if(self.player2_name == None):
+
+        if(self.player2_name == None):# saving ids and names into agents memory if not already done 
             if(self.player1_name == players_json[0]["name"]):
                 self.player1_id = 0
                 self.player2_id = 1
@@ -464,23 +446,9 @@ class Agent:
                 self.player1_id = 1
                 self.player2_id = 0
                 self.player2_name = players_json[0]["name"]
-        # --- Map Processing ---
-        # Assuming map dimensions are consistent based on the first state
         
-        map_array = np.zeros((60, 60, 3), dtype=np.float32) # Use float32 for torch
+        map_array = np.zeros((map_height, map_width, 3), dtype=np.float32) # Use float32 for torch
 
-        # Identify player IDs and names if not already set (from the first state)
-        if self.player1_name is None:
-             # Assuming the first player in the 'players' list is always your agent
-             self.player1_name = players_json[0]["playerName"]
-             self.player1_id = 0 # Assuming index 0 is always your agent
-
-             # Find the opponent
-             for i, player in enumerate(players_json):
-                 if player["playerName"] != self.player1_name:
-                     self.player2_name = player["playerName"]
-                     self.player2_id = i
-                     break
 
         # Populate the map array
         for i, row in enumerate(map_json):
@@ -554,8 +522,9 @@ class Agent:
         # Correctly concatenate numerical arrays
         move_count = game_info.get("moveCount", 0)
         game_metadata = np.array([move_count / 900.0], dtype=np.float32) # Normalize move count
+        points_diff = np.array([game_info["players"][self.player1_id]["score"] - game_info["players"][self.player2_id]["score"]] , dtype=np.float32)/10000
 
-        metadata_array = np.concatenate((player1_metadata, player2_metadata, game_metadata))
+        metadata_array = np.concatenate((player1_metadata, player2_metadata, game_metadata, points_diff))
 
         # Ensure map_array has channels first for PyTorch CNN (C, H, W)
         map_array = np.transpose(map_array, (2, 0, 1))
@@ -587,6 +556,8 @@ class Agent:
 
     def train_long_term(self):
         """Trains the model using a batch of experiences from the memory."""
+        if self.n_games > 500:
+            self.model.freeze_backbone(False)
         
         if len(self.memory) > BATCH_SIZE and not (len(self.memory) <1000 and self.n_games >100):
             mini_sample = random.sample(self.memory, BATCH_SIZE) 
