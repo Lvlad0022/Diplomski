@@ -1,16 +1,20 @@
 
 from q_logic import Agent
 from simplebot import HeatmapBot
+from for_logging import CSVLogger
 import os
 import random
 import time
 import sys
+
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 # Get the path of the parent directory (AIBG-9.0-master/)
 parent_dir = os.path.dirname(current_dir)
 # Add the parent directory to Python's search path
 sys.path.insert(0, parent_dir)
+
+print(  )
 from logic.game import SnakeGame
 
 def serialize_game_state(game):
@@ -63,17 +67,21 @@ if not os.path.exists(CHECKPOINT_FOLDER):
 # Definiraj relativne putanje za spremanje koristeći os.path.join
 # Ovo će stvoriti putanje poput 'model_checkpoints/save_agent.pth'
 file_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
+log_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
 file_path_simple = os.path.join(CHECKPOINT_FOLDER, 'save_simple.pth')
+log_path_simple = os.path.join(CHECKPOINT_FOLDER, 'save_simle_log.csv')
 agent1 = Agent(name1)
-print(file_path)
-
+agent1.save_agent_state(file_path_simple)
 agent2 = Agent(name2)
 
 simplebot = HeatmapBot(name2)
 
 num_games = 10000
 
-
+logger = CSVLogger(log_path_simple, fieldnames=[
+    "game", "vrijeme1", "vrijeme2", "sum_reward", "avg_count",
+    "win_pct", "loss_moving_avg", "epsilon", "learning_rate", "num_moves"
+])
 avg_count = 0
 moving_avg = 0
 win_pct = 0
@@ -95,6 +103,7 @@ for i in range(num_games):
     
     vrijeme1 = 0
     vrijeme2 = 0
+
 
     while not GameOver:
         count+=1
@@ -134,7 +143,7 @@ for i in range(num_games):
     avg_count = (count)*0.01 + avg_count*0.99
     moving_avg = (sum_reward/count)*0.01 + moving_avg*0.99
     loss_moving_avg = (sum_loss/count)*0.01 + loss_moving_avg*0.99
-    if((i+1)%500==0):
+    if((i+1)%500==0 and i >100):
         agent1.save_agent_state(file_path_simple)
     
     n_games, epsilon, lr = agent1.get_model_state()
@@ -149,6 +158,19 @@ for i in range(num_games):
     print(f"epsilon: {epsilon}")
     print(f"learning rate: {lr}")
     print(f"broj_poteza{count}")
+    logger.log({
+        "game": i,
+        "vrijeme1": vrijeme1 / count,
+        "vrijeme2": vrijeme2 / count,
+        "sum_reward": moving_avg,
+        "avg_count": avg_count,
+        "win_pct": win_pct,
+        "loss_moving_avg": loss_moving_avg,
+        "epsilon": epsilon,
+        "learning_rate": lr,
+        "num_moves": count,
+    })
+
 
 if(num_games):
     agent1.save_agent_state(file_path_simple)

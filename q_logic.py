@@ -6,8 +6,6 @@ import time
 import traceback
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import random
 import numpy as np
 from collections import deque
@@ -22,7 +20,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import ExponentialLR 
 import os
+
+from snake_models import AdvancedSnakeNN, ResnetSnakeNN
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -45,13 +46,18 @@ class QTrainer:
         self.gamma = gamma
         self.model = model
         self.model_target = model_target
-        self.optimizer = optim.Adam([
-                {'params': self.model.backbone.parameters(), 'lr': 5e-5},  # Pretrained
-                {'params': self.model.metadata_fc_layers.parameters()},
-                {'params': self.model.combined_fc_layers.parameters()},
-                {'params': self.model.output_layer.parameters()}
-            ], lr=5e-4)  # Faster LR for new layers
-        self.criterion = nn.MSELoss() # Mean Squared Error Loss
+        
+        if isinstance(self.model, AdvancedSnakeNN):
+            self.optimizer = optim.Adam(model.parameters(),lr=5e-4)  
+
+        if isinstance(self.model, ResnetSnakeNN):
+            self.optimizer = optim.Adam([
+                    {'params': self.model.backbone.parameters(), 'lr': 5e-5}, 
+                    {'params': self.model.metadata_fc_layers.parameters()},
+                    {'params': self.model.combined_fc_layers.parameters()},
+                    {'params': self.model.output_layer.parameters()}
+                ], lr=5e-4)  
+        self.criterion = nn.MSELoss() 
         self.scheduler = None
         if scheduler:
             self.scheduler = ExponentialLR(self.optimizer, gamma=0.9999) 
@@ -89,10 +95,10 @@ class QTrainer:
         pred = self.model(map_state, metadata_state) # Shape: (batch_size, num_actions)
 
         # 2: Calculate the target Q values based on the Bellman equation
-        target = pred.clone()
+        target = pred.detach().clone()
         with torch.no_grad(): # Calculate targets without tracking gradients
             # Set model to evaluation mode for calculating target Qs from next state
-            self.model.eval()
+            self.model_target.eval()
             next_state_q_values = self.model_target(next_map_state, next_metadata_state) # Shape: (batch_size, num_actions)
             # Set model back to training mode
             self.model.train()
@@ -119,80 +125,16 @@ class QTrainer:
             self.model_target_counter = 0
             self.model_target.load_state_dict(self.model.state_dict())
 
-from torchvision import models
 
-class AdvancedSnakeNN(nn.Module):
-    def __init__(self):
-        super(AdvancedSnakeNN, self).__init__()
 
-        map_height = 25
-        map_width = 60
-        metadata_dim = 38
-        num_actions = 4
 
-        # Pretrained ResNet18 (remove final FC layer)
-        resnet = models.resnet18(pretrained=True)
-        self.backbone = nn.Sequential(*list(resnet.children())[:-1])  # Remove last FC layer
-        self.backbone_output_size = resnet.fc.in_features  # Usually 512
 
-        # Resize your map input to 3x224x224 for ResNet
-        self.input_resizer = nn.Upsample(size=(224, 224), mode='bilinear', align_corners=False)
-
-        # Metadata processing
-        self.metadata_fc_layers = nn.Sequential(
-            nn.Linear(metadata_dim, 64),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Linear(64, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-        )
-        metadata_out = 256
-
-        # Combined layers
-        self.combined_fc_layers = nn.Sequential(
-            nn.Linear(self.backbone_output_size + metadata_out, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-        )
-
-        self.output_layer = nn.Linear(128, num_actions)
-
-    def forward(self, map_input, metadata_input):
-        map_input = self.input_resizer(map_input)  # Resize for ResNet
-        x = self.backbone(map_input).view(map_input.size(0), -1)
-        metadata = self.metadata_fc_layers(metadata_input)
-        combined = torch.cat([x, metadata], dim=1)
-        x = self.combined_fc_layers(combined)
-        return self.output_layer(x)
-
-    def save(self, file_name='model.pth'):
-        model_folder_path = './model'
-        if not os.path.exists(model_folder_path):
-            os.makedirs(model_folder_path)
-
-        file_name = os.path.join(model_folder_path, file_name)
-        torch.save(self.state_dict(), file_name)
-    
-    def freeze_backbone(self, freeze=True):
-        """
-        Freezes or unfreezes the EfficientNet backbone.
-
-        Args:
-            freeze (bool): If True, freeze all backbone layers (no gradient update).
-                           If False, unfreeze (allow training).
-        """
-        for param in self.backbone.parameters():
-            param.requires_grad = not freeze
 
 
 
 # --- Constants ---
 MAX_MEMORY = 100_000
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 LR = 0.0005
 
 # --- Item and Move Mappings ---
@@ -249,7 +191,6 @@ class Agent:
 
         # --- Use the AdvancedSnakeNN model --
         self.model = AdvancedSnakeNN().to(DEVICE)
-        self.model.freeze_backbone(True)
         self.model_target = AdvancedSnakeNN().to(DEVICE)
         # Obavezno sinkronizirajte težine na početku!
         self.model_target.load_state_dict(self.model.state_dict())
@@ -391,33 +332,31 @@ class Agent:
 
     # Unutar Agent klase u q_logic.py
     def give_reward(self, data, data_prosli):
-        reward = 0
-        game_over = 0
         winner = data.get("winner")
-
         if winner is not None:
-            self.n_games = self.n_games+1
-            if winner == self.player1_name:
-                reward = 1  # Velika nagrada za pobjedu
-            else:
-                reward = -1 # Velika kazna za poraz
-        else:
-            score11 = data["players"][self.player1_id]["score"]
-            score12 = data_prosli["players"][self.player1_id]["score"]
-            score21 = data["players"][self.player2_id]["score"]
-            score22 = data_prosli["players"][self.player2_id]["score"]
+            self.n_games += 1
+            return 1.0 if winner == self.player1_name else -1.0
 
-            score1diff = (score11 - score12)
-            score2diff = (score21 - score22) 
-            # --- KRAJ NOVE LOGIKE ---
+        # living bonus
+        reward = 0.01
 
-            move_count = data.get("moveCount", 0)
+        # immediate scoring (difference)
+        p1_now  = data["players"][self.player1_id]["score"]
+        p1_prev = data_prosli["players"][self.player1_id]["score"]
+        p2_now  = data["players"][self.player2_id]["score"]
+        p2_prev = data_prosli["players"][self.player2_id]["score"]
 
-            # Izračunaj bodovnu prednost, sada pomnoženu s faktorom hitnosti
-            reward = (score1diff - score2diff) * 0.0001
-            reward += 0.01 
-        # ... (logika za 'survived' i return) ...
+        score_gain = (p1_now - p1_prev) /10
+        reward += 0.001 * score_gain   # <- easy to feel; tune 0.005–0.02
+
+        # (optional) late-game pressure if behind
+        move_count = data.get("moveCount", 0)
+        if move_count > 700:
+            lead = (p1_now - p2_now)
+            reward += 0.001 * np.tanh(lead / 5.0)
+
         return reward
+
 
     def get_state(self, data):
         """
@@ -556,10 +495,11 @@ class Agent:
 
     def train_long_term(self):
         """Trains the model using a batch of experiences from the memory."""
-        if self.n_games > 500:
+        if self.n_games > 500 and isinstance(self.model, ResnetSnakeNN):
             self.model.freeze_backbone(False)
+
         
-        if len(self.memory) > BATCH_SIZE and not (len(self.memory) <1000 and self.n_games >100):
+        if not len(self.memory) <1000 :
             mini_sample = random.sample(self.memory, BATCH_SIZE) 
             
 
@@ -603,7 +543,7 @@ class Agent:
         final_move = [0,0,0,0] # Assuming 4 possible actions (straight, right, left)
 
         
-        if(self.counter%10 and self.epsilon):
+        if(self.counter%10==0 and self.epsilon):
             self.epsilon = max(self.epsilon_min , self.epsilon * self.epsilon_decay)
         if random.uniform(0, 1) < self.epsilon: # Increased random range for slower decay
             # Exploration: Choose a random action
