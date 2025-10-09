@@ -1,0 +1,1 @@
+probati napraviti neuralnu mrezu koja predviđa iduci potez protivnika s obzirom na prijasnje poteze(VJV)
