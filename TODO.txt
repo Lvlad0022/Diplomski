@@ -1,2 +1,1 @@
-zelim napraviti n-step remmber gdje model pamti nagrade iducih n koraka i pamti stanje nakon n koraka pa onda za to racuna s target modelom value 
-znaci razlika je u tome sto ce pamtiti reward = (r1+ gamma*r2+gamma^2*r3 +...+gamma^(n-1)rn ) te stanje sn 
+zelim dodati veci loss na igre blizu kraja

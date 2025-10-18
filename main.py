@@ -66,114 +66,117 @@ if not os.path.exists(CHECKPOINT_FOLDER):
 
 # Definiraj relativne putanje za spremanje koristeći os.path.join
 # Ovo će stvoriti putanje poput 'model_checkpoints/save_agent.pth'
-file_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
-log_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
-file_path_simple = os.path.join(CHECKPOINT_FOLDER, 'save_simple.pth')
-log_path_simple = os.path.join(CHECKPOINT_FOLDER, 'save_simle_log.csv')
-agent1 = Agent(name1)
-agent1.save_agent_state(file_path_simple)
-agent2 = Agent(name2)
-
-simplebot = HeatmapBot(name2)
-
-num_games = 10000
-
-logger = CSVLogger(log_path_simple, fieldnames=[
-    "game", "vrijeme1", "vrijeme2", "sum_reward", "avg_count",
-    "win_pct", "loss_moving_avg", "epsilon", "learning_rate", "num_moves"
-])
-avg_count = 0
-moving_avg = 0
-win_pct = 0
-loss_moving_avg= 0
-for i in range(num_games):
-    game = SnakeGame()
-    game.add_player({"id": id1, "name": name1})
-    game.add_player({"id": id2, "name": name2})
-
-
-    GameOver = False
-
-    data = serialize_game_state(game)
-    sum_reward = 0
-
-    count = 0
-    avg_loss = 0
-    sum_loss = 0
-    
-    vrijeme1 = 0
-    vrijeme2 = 0
-
-
-    while not GameOver:
-        count+=1
-        moves = []
-        a = time.time()
-        moves.append({"playerId": id1 , "direction": agent1.get_action(data)})
-        b = time.time()
-        
-        moves.append({"playerId": id2 , "direction": simplebot.get_action(data)})
-        c= time.time()
-
-        vrijeme1 += (b-a)
-        vrijeme2 += (c-b)
-        game.process_moves(moves)
-
-        novi_data = serialize_game_state(game)
-        reward = agent1.give_reward(novi_data,data)
-        sum_reward += reward
-
-        p = random.randint(0,1)
-        if(i < 4000 or p < granica(count,avg_count) ):
-            agent1.remember(data,novi_data)
-
-        if(count%2 == 0 and i >5):
-            sum_loss += agent1.train_long_term()
-
-        data = novi_data
-        GameOver = game.check_game_over()
-        if(GameOver):
-            if novi_data.get('winner') == name1:
-                win_pct = win_pct * 0.99 + 0.01
-            else:
-                win_pct = win_pct * 0.99 
-
-    #sum_loss += agent1.train_long_term()
-
-    avg_count = (count)*0.01 + avg_count*0.99
-    moving_avg = (sum_reward/count)*0.01 + moving_avg*0.99
-    loss_moving_avg = (sum_loss/count)*0.01 + loss_moving_avg*0.99
-    if((i+1)%500==0 and i >100):
-        agent1.save_agent_state(file_path_simple)
-    
-    n_games, epsilon, lr = agent1.get_model_state()
-
-    print(f"igra: {i}")
-    print(f"vrijeme1: {vrijeme1/count}")
-    print(f"vrijeme2: {vrijeme2/count}")
-    print(f"sum_reward: {moving_avg}")
-    print(f"avg count:{avg_count}")
-    print(f"win_pct: {win_pct}")
-    print(f"loss moving_avg: {loss_moving_avg}")
-    print(f"epsilon: {epsilon}")
-    print(f"learning rate: {lr}")
-    print(f"broj_poteza{count}")
-    logger.log({
-        "game": i,
-        "vrijeme1": vrijeme1 / count,
-        "vrijeme2": vrijeme2 / count,
-        "sum_reward": moving_avg,
-        "avg_count": avg_count,
-        "win_pct": win_pct,
-        "loss_moving_avg": loss_moving_avg,
-        "epsilon": epsilon,
-        "learning_rate": lr,
-        "num_moves": count,
-    })
-
-
-if(num_games):
+for i in [3,5,7]:
+    file_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
+    log_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
+    file_path_simple = os.path.join(CHECKPOINT_FOLDER, f'save_simple_resnet_n{i}.pth')
+    log_path_simple = os.path.join(CHECKPOINT_FOLDER, f'save_simle_resnet_log_n{i}.csv')
+    agent1 = Agent(name1,n_step_remember=i, gamma=0.80)
     agent1.save_agent_state(file_path_simple)
+    agent2 = Agent(name2)
+
+    simplebot = HeatmapBot(name2)
+
+    num_games = 7000
+
+    logger = CSVLogger(log_path_simple, fieldnames=[
+        "game", "vrijeme1", "vrijeme2", "sum_reward", "avg_count",
+        "win_pct", "loss_moving_avg", "epsilon", "learning_rate", "num_moves"
+    ])
+    avg_count = 0
+    moving_avg = 0
+    win_pct = 0
+    loss_moving_avg= 0
+    for i in range(num_games):
+        game = SnakeGame()
+        game.add_player({"id": id1, "name": name1})
+        game.add_player({"id": id2, "name": name2})
+
+
+        GameOver = False
+
+        data = serialize_game_state(game)
+        sum_reward = 0
+
+        count = 0
+        avg_loss = 0
+        sum_loss = 0
+        
+        vrijeme1 = 0
+        vrijeme2 = 0
+
+
+        while not GameOver:
+            
+            moves = []
+            a = time.time()
+            moves.append({"playerId": id1 , "direction": agent1.get_action(data)})
+            b = time.time()
+            
+            moves.append({"playerId": id2 , "direction": simplebot.get_action(data)})
+            c= time.time()
+
+            vrijeme1 += (b-a)
+            vrijeme2 += (c-b)
+            game.process_moves(moves)
+
+            novi_data = serialize_game_state(game)
+            reward = agent1.give_reward(novi_data,data)
+            sum_reward += reward
+
+            p = random.randint(0,1)
+            if(i < 4000 or p < granica(count,avg_count) ):
+                agent1.remember(data,novi_data)
+
+            if(count%8 == 0 and i >5):
+                count+=1
+                sum_loss += agent1.train_long_term()
+
+            data = novi_data
+            GameOver = game.check_game_over()
+            if(GameOver):
+                if novi_data.get('winner') == name1:
+                    win_pct = win_pct * 0.99 + 0.01
+                else:
+                    win_pct = win_pct * 0.99 
+
+        #sum_loss += agent1.train_long_term()
+
+        avg_count = (count)*0.01 + avg_count*0.99
+        moving_avg = (sum_reward/count)*0.01 + moving_avg*0.99
+        loss_moving_avg = (sum_loss/count)*0.01 + loss_moving_avg*0.99
+        if((i+1)%500==0 and i >100):
+            agent1.save_agent_state(file_path_simple)
+        
+        n_games, epsilon, lr = agent1.get_model_state()
+
+        print(f"igra: {i}")
+        print(f"vrijeme1: {vrijeme1/count}")
+        print(f"vrijeme2: {vrijeme2/count}")
+        print(f"sum_reward: {moving_avg}")
+        print(f"avg count:{avg_count}")
+        print(f"win_pct: {win_pct}")
+        print(f"loss moving_avg: {loss_moving_avg}")
+        print(f"epsilon: {epsilon}")
+        print(f"learning rate: {lr}")
+        print(f"broj_poteza{count}")
+        logger.log({
+            "game": i,
+            "vrijeme1": vrijeme1 / count,
+            "vrijeme2": vrijeme2 / count,
+            "sum_reward": moving_avg,
+            "avg_count": avg_count,
+            "win_pct": win_pct,
+            "loss_moving_avg": loss_moving_avg,
+            "epsilon": epsilon,
+            "learning_rate": lr,
+            "num_moves": count,
+        })
+
+
+    if(num_games):
+        agent1.save_agent_state(file_path_simple)
+
 agent2.load_agent_state(file_path_simple, training=False)
 num_games = 0
 change_every =0

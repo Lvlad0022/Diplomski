@@ -22,6 +22,9 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ExponentialLR 
 import os
+from queue import Queue
+from collections import deque
+
 
 from snake_models import AdvancedSnakeNN, ResnetSnakeNN
 
@@ -33,7 +36,7 @@ class QTrainer:
     Trains the Q-network using experiences.
     Implements the training step for a DQN-like agent.
     """
-    def __init__(self, model,model_target, scheduler = False, lr=0.0005, gamma=0.93):
+    def __init__(self, model,model_target, criterion = nn.MSELoss(), optimizer = None, scheduler = False, lr=0.0005, gamma=0.93):
         """
         Initializes the QTrainer.
 
@@ -43,28 +46,21 @@ class QTrainer:
             gamma (float): Discount factor for future rewards.
         """
         self.lr = lr
-        self.gamma = gamma
         self.model = model
         self.model_target = model_target
         
-        if isinstance(self.model, AdvancedSnakeNN):
-            self.optimizer = optim.Adam(model.parameters(),lr=5e-4)  
+        self.optimizer = optimizer
 
-        if isinstance(self.model, ResnetSnakeNN):
-            self.optimizer = optim.Adam([
-                    {'params': self.model.backbone.parameters(), 'lr': 5e-5}, 
-                    {'params': self.model.metadata_fc_layers.parameters()},
-                    {'params': self.model.combined_fc_layers.parameters()},
-                    {'params': self.model.output_layer.parameters()}
-                ], lr=5e-4)  
-        self.criterion = nn.MSELoss() 
+        self.criterion = criterion
         self.scheduler = None
         if scheduler:
             self.scheduler = ExponentialLR(self.optimizer, gamma=0.9999) 
         self.model_target_counter = 0
-        self.model_target_cycle = 1000
+        self.model_target_cycle = 200 # ovo je jako bitno 
+        self.model_target_cycle_mult = 1.2
+        self.model_target_max = 3000
 
-    def train_step(self, map_state, metadata_state, action, reward, next_map_state, next_metadata_state, done):
+    def train_step(self, map_state, metadata_state, action, reward, next_map_state, next_metadata_state, done, gamma_train,end_priority):
         self.model_target_update()
         # Ensure inputs are tensors and have the correct data types
         map_state = map_state.float().to(DEVICE)
@@ -74,6 +70,9 @@ class QTrainer:
         next_map_state = next_map_state.float().to(DEVICE)
         next_metadata_state = next_metadata_state.float().to(DEVICE)
         done = done.bool().to(DEVICE) 
+        gamma_train = gamma_train.float().to(DEVICE)
+        end_priority = end_priority.float().to(DEVICE)
+
 
         # If only a single experience is provided, add a batch dimension
         # Check the shape of map_state to determine if it's a single experience or a batch
@@ -85,6 +84,7 @@ class QTrainer:
              next_map_state = torch.unsqueeze(next_map_state, 0) # -> (1, C, H, W)
              next_metadata_state = torch.unsqueeze(next_metadata_state, 0) # -> (1, metadata_dim)
              done = torch.unsqueeze(done, 0) # -> (1,)
+             end_priority = torch.unsqueeze(end_priority, 0)
         # Else: Assume it's already a batch: (B, C, H, W), (B, metadata_dim), etc.
 
 
@@ -108,11 +108,12 @@ class QTrainer:
         # Update the target Q-value for the action that was actually taken
         # target[idx][action_index] = reward[idx] + self.gamma * max_next_q[idx] * (1 - done[idx])
         # Using advanced indexing for efficiency instead of loop
-        target[range(len(done)), torch.argmax(action, dim=1)] = reward + self.gamma * max_next_q * (~done) # Use ~done for not done
+        target[range(len(done)), torch.argmax(action, dim=1)] = reward + gamma_train * max_next_q * (~done) # Use ~done for not done
 
         # 3: Compute the loss
         self.optimizer.zero_grad()
         loss = self.criterion(target, pred)
+        
         loss.backward()
         self.optimizer.step()
         if self.scheduler:
@@ -121,7 +122,8 @@ class QTrainer:
 
     def model_target_update(self):
         self.model_target_counter += 1
-        if(self.model_target_counter % self.model_target_cycle  == 0):
+        if(self.model_target_counter > self.model_target_cycle  ):
+            self.model_target_cycle = min( self.model_target_cycle_mult* self.model_target_cycle, self.model_target_max)
             self.model_target_counter = 0
             self.model_target.load_state_dict(self.model.state_dict())
 
@@ -139,40 +141,12 @@ LR = 0.0005
 
 # --- Item and Move Mappings ---
 # (Keep your existing mappings)
-items_names = {"apple": 1,
-           "golden-apple": 2,
-           "katana":3,
-           "armour":4,
-           "shorten":5,
-           "tron":6,
-           "freeze":7,
-           "leap":8,
-           "nausea":9,
-           "reset-borders":10}
-items_names_to_players = {
-    "katana":6,
-    "armour":8,
-    "tron":10,
-    "freeze":12,
-    "loop":14, # Note: 'loop' was in your code, but 'tron' and 'freeze' were also in lasting_items and items_names_to_players. Double check these mappings.
-    "golden-apple":16
-}
-lasting_items = [
-    "katana",
-    "armour",
-    "tron",
-    "freeze",
-    "loop", # Check if 'loop' is a valid item type
-    "golden-apple"]
-move_names = {"up": 0, # Changed to 0, 1, 2 to match typical 3-action output (straight, right, left)
-              "right": 1,
-              "down": 2, # Assuming 'down' is same action as 'up' in terms of turning (straight)
-              "left": 3} # Assuming 'left' is a turn left
+
 
 # --- Agent Class ---
 class Agent:
 
-    def __init__(self, player1_name):
+    def __init__(self, model, optimizer ,train = True,n_step_remember=1, gamma=0.93,end_priority = 1):
         """
         Initializes the Agent.
 
@@ -185,25 +159,30 @@ class Agent:
         """
         self.n_games = 0
         self.epsilon = 0.9           # Početna vrijednost
-        self.epsilon_min = 0.05        # Minimalna vrijednost
-        self.epsilon_decay = 0.99995 
+        self.epsilon_min = 0.05      # Minimalna vrijednost
+        self.epsilon_decay = 0.9995 
         self.memory = deque(maxlen=MAX_MEMORY) # popleft()
+        self.end_priority = end_priority
 
         # --- Use the AdvancedSnakeNN model --
-        self.model = AdvancedSnakeNN().to(DEVICE)
-        self.model_target = AdvancedSnakeNN().to(DEVICE)
+        self.model = model.to(DEVICE)
+        self.model_target = model.to(DEVICE)
         # Obavezno sinkronizirajte težine na početku!
         self.model_target.load_state_dict(self.model.state_dict())
 
-        self.trainer = QTrainer(self.model,self.model_target, lr = LR)
+        self.trainer = QTrainer(self.model,self.model_target, optimizer=optimizer, lr = LR,gamma=gamma)
 
-        self.player1_name = player1_name
-        self.player2_name = None
-        self.player1_id = None # Store player IDs
-        self.player2_id = None
-        self.enemy_cons = 1 # Placeholder, adjust based on game state if available
+        
         self.counter= 0 
+        
+        self.n_step_remember = n_step_remember
         self.last_action = None
+        self.rewards = deque(maxlen=n_step_remember)
+        self.remember_data = deque(maxlen=n_step_remember)
+        self.gamma = gamma
+        self.rewards_average = 0
+        self.train = train
+
 
     def return_counter(self):
         return self.counter
@@ -241,8 +220,8 @@ class Agent:
     
     def get_model_state(self):
         lr = LR
-        if self.trainer.scheduler:
-            lr = self.trainer.scheduler.get_last_lr()[0]
+        if self.trainer.optimizer:
+            lr = self.trainer.optimizer.param_groups[0]["lr"]
         return self.n_games, self.epsilon, lr
 
     def load_agent_state(self, file_name='agent_state.pth', training=True):
@@ -299,7 +278,7 @@ class Agent:
     def change_weights(self, other):
         self.model.load_state_dict(other.model.state_dict())
 
-
+    '''
     def dead_from_hitting_the_wall(self, previous_head_pos, move_direction, game_map):
         fatal_pos = previous_head_pos.copy() # Napravi kopiju da ne mijenjaš original
         if move_direction == 'up':
@@ -329,169 +308,35 @@ class Agent:
             return 2
             
         return 3
-
-    # Unutar Agent klase u q_logic.py
-    def give_reward(self, data, data_prosli):
-        winner = data.get("winner")
-        if winner is not None:
-            self.n_games += 1
-            return 1.0 if winner == self.player1_name else -1.0
-
-        # living bonus
-        reward = 0.01
-
-        # immediate scoring (difference)
-        p1_now  = data["players"][self.player1_id]["score"]
-        p1_prev = data_prosli["players"][self.player1_id]["score"]
-        p2_now  = data["players"][self.player2_id]["score"]
-        p2_prev = data_prosli["players"][self.player2_id]["score"]
-
-        score_gain = (p1_now - p1_prev) /10
-        reward += 0.001 * score_gain   # <- easy to feel; tune 0.005–0.02
-
-        # (optional) late-game pressure if behind
-        move_count = data.get("moveCount", 0)
-        if move_count > 700:
-            lead = (p1_now - p2_now)
-            reward += 0.001 * np.tanh(lead / 5.0)
-
-        return reward
-
-
-    def get_state(self, data):
-        """
-        Processes the game state JSON data into map and metadata arrays.
-
-        Args:
-            data (dict): The game state data loaded from the JSON file.
-
-        Returns:
-            tuple: (metadata_array, map_array)
-        """
-        map_height = 25
-        map_width = 60
-        map_json = data["map"]
-        players_json = data["players"]
-        game_info = data 
-
-
-        if(self.player2_name == None):# saving ids and names into agents memory if not already done 
-            if(self.player1_name == players_json[0]["name"]):
-                self.player1_id = 0
-                self.player2_id = 1
-                self.player2_name = players_json[1]["name"]
-            else:
-                self.player1_name = players_json[1]["name"]
-                self.player1_id = 1
-                self.player2_id = 0
-                self.player2_name = players_json[0]["name"]
-        
-        map_array = np.zeros((map_height, map_width, 3), dtype=np.float32) # Use float32 for torch
-
-
-        # Populate the map array
-        for i, row in enumerate(map_json):
-            for j, item in enumerate(row):
-                if item is not None:
-                    item_type = item.get("type") # Use .get() for safety
-                    if item_type == "border":
-                        map_array[i, j, 0] = 1  # Border channel
-                    elif item_type in ["snake-body", "snake-head"]:
-                        player_name = item.get("playerName")
-                        if player_name == self.player1_name:
-                            # Your snake body/head
-                            map_array[i, j, 1] = 1 if item_type == "snake-head" else 0.5 # Your snake channel
-                        elif player_name == self.player2_name:
-                            # Enemy snake body/head
-                            map_array[i, j, 1] = -1 if item_type == "snake-head" else -0.5 # Enemy snake channel
-                    elif item_type in items_names:
-                        # Item channel - use normalized item ID
-                        map_array[i, j, 2] = items_names[item_type] / len(items_names) # Normalize item ID
-
-        # --- Metadata Processing ---
-        # Create arrays for player 1 and player 2 metadata
-        # Ensure consistent size regardless of active items
-        player1_metadata = np.zeros(18, dtype=np.float32)
-        player2_metadata = np.zeros(18, dtype=np.float32)
-
-        # Populate player 1 metadata
-        if self.player1_id is not None:
-            p1_data = players_json[self.player1_id]
-            if p1_data["body"]: # Check if body is not empty
-                player1_metadata[0] = p1_data["body"][0]["row"] / map_height # Normalized head row
-                player1_metadata[1] = p1_data["body"][0]["column"] / map_width # Normalized head column
-            # Note: Your original code used move_names[players_json[0]["lastMoveDirection"]] = 1
-            # This assumes a specific mapping and a fixed size array.
-            # A more flexible approach might encode direction differently or include velocity.
-            # For now, keeping a placeholder based on your structure:
-            last_move = p1_data.get("lastMoveDirection")
-            if last_move in move_names:
-                 # Set the corresponding index to 1 (assuming one-hot encoding of direction)
-                 player1_metadata[move_names[last_move] + 2] = 1 # +2 because 0 and 1 are head pos
-
-            # Add active item information
-            for item in p1_data.get("activeItems", []):
-                 item_type = item.config["type"]
-                 #item_type = item.get("type")
-                 if item_type in items_names_to_players:
-                     # Set the corresponding index to 1 for the item presence
-                     player1_metadata[items_names_to_players[item_type]] = 1
-                     # Set the next index for normalized duration
-                     player1_metadata[items_names_to_players[item_type] + 1] = item.duration / 15.0 # Normalize duration
-
-        # Populate player 2 metadata
-        if self.player2_id is not None:
-            p2_data = players_json[self.player2_id]
-            if p2_data["body"]: # Check if body is not empty
-                player2_metadata[0] = p2_data["body"][0]["row"] / map_height # Normalized head row
-                player2_metadata[1] = p2_data["body"][0]["column"] / map_width # Normalized head column
-            last_move = p2_data.get("lastMoveDirection")
-            if last_move in move_names:
-                 player2_metadata[move_names[last_move] + 2] = 1 # +2 because 0 and 1 are head pos
-
-            # Add active item information
-            for item in p2_data.get("activeItems", []):
-                 item_type = item.config["type"]
-                 #item_type = item.get("type")
-                 if item_type in items_names_to_players:
-                     player2_metadata[items_names_to_players[item_type]] = 1
-                     player2_metadata[items_names_to_players[item_type] + 1] = item.duration / 15.0 # Normalize duration
-
-        # Combine player metadata and add game-level metadata
-        # Correctly concatenate numerical arrays
-        move_count = game_info.get("moveCount", 0)
-        game_metadata = np.array([move_count / 900.0], dtype=np.float32) # Normalize move count
-        points_diff = np.array([game_info["players"][self.player1_id]["score"] - game_info["players"][self.player2_id]["score"]] , dtype=np.float32)/10000
-
-        metadata_array = np.concatenate((player1_metadata, player2_metadata, game_metadata, points_diff))
-
-        # Ensure map_array has channels first for PyTorch CNN (C, H, W)
-        map_array = np.transpose(map_array, (2, 0, 1))
-
-        return  map_array,metadata_array # Also return the raw data for reward calculation
+    '''
 
     def remember(self, data, data_novi):
         map_state, metadata_state = self.get_state(data) 
-        action  = self.last_action
-        reward = self.give_reward(data = data_novi, data_prosli= data)
-        reward = reward
+        self.remember_data.append((map_state, metadata_state,self.last_action))
+
+        reward = self.give_reward(data_novi = data_novi,data = data, akcija = self.last_action)
+        self.rewards_average +=  self.gamma ** len(self.rewards) * reward 
+        self.rewards.append(reward)
+
         next_map_state, next_metadata_state = self.get_state(data_novi)
         done = 1 if data_novi.get("winner") is not None else 0
-        """
-        Stores an experience tuple in the agent's memory.
+        
+        if done:
+            gamma_train = self.gamma ** (len(self.rewards))
+            while not len(self.remember_data) == 0:
+                map_state, metadata_state,action = self.remember_data.popleft()
+                self.memory.append((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, gamma_train, self.end_priority))
+                gamma_train = gamma_train / self.gamma
+                reward = self.rewards.popleft()
+                self.rewards_average = (self.rewards_average - reward) / self.gamma
+            self.rewards_average = 0
+            
 
-        Args:
-            map_state (np.ndarray): The current map state.
-            metadata_state (np.ndarray): The current metadata state.
-            action (list): The action taken (one-hot encoded).
-            reward (float): The reward received.
-            next_map_state (np.ndarray): The next map state.
-            next_metadata_state (np.ndarray): The next metadata state.
-            done (bool): Whether the episode is finished.
-
-        """
-        # Store the experience as a tuple of numpy arrays and other data
-        self.memory.append((map_state, metadata_state, action, reward, next_map_state, next_metadata_state, done))
+        elif len(self.rewards) == self.n_step_remember:
+            map_state, metadata_state,action = self.remember_data.popleft()
+            self.memory.append((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done,self.gamma ** self.n_step_remember, 1))
+            reward = self.rewards.popleft()
+            self.rewards_average = (self.rewards_average - reward) / self.gamma
 
     def train_long_term(self):
         """Trains the model using a batch of experiences from the memory."""
@@ -504,7 +349,7 @@ class Agent:
             
 
             # Unpack the samples into separate lists
-            map_states, metadata_states, actions, rewards, next_map_states, next_metadata_states, dones = zip(*mini_sample)
+            map_states, metadata_states, actions, rewards, next_map_states, next_metadata_states, dones,gamma_train, end_priority = zip(*mini_sample)
 
             # Convert lists of numpy arrays to tensors
             map_states = torch.tensor(np.array(map_states), dtype=torch.float)
@@ -514,10 +359,12 @@ class Agent:
             next_map_states = torch.tensor(np.array(next_map_states), dtype=torch.float)
             next_metadata_states = torch.tensor(np.array(next_metadata_states), dtype=torch.float)
             dones = torch.tensor(np.array(dones), dtype=torch.bool) # Done flags are boolean
+            gamma_train = torch.tensor(np.array(gamma_train), dtype=torch.float)
+            end_priority = torch.tensor(np.array(end_priority), dtype=torch.float)
 
             # --- Call the trainer with separate inputs ---
             # You need to modify your QTrainer.train_step to accept these
-            loss =self.trainer.train_step(map_states, metadata_states, actions, rewards, next_map_states, next_metadata_states, dones)
+            loss =self.trainer.train_step(map_states, metadata_states, actions, rewards, next_map_states, next_metadata_states, dones,gamma_train, end_priority)
             #print("Training long memory batch...") # Placeholder
             return loss
         return 0
@@ -558,11 +405,11 @@ class Agent:
 
             # Get prediction from the model
             
-            self.model.eval()
+            self.model_target.eval()
             with torch.no_grad(): # No gradient calculation during inference
-                prediction = self.model(map_state_tensor, metadata_state_tensor).cpu()
+                prediction = self.model_target(map_state_tensor, metadata_state_tensor).cpu()
             # Set model back to training mode after inference
-            self.model.train()
+            self.model_target.train()
             # Get the action with the highest predicted Q-val
             # ue
             #mjere = (torch.max(prediction), torch.min(prediction), torch.mean(predition))
