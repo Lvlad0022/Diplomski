@@ -27,6 +27,7 @@ from collections import deque
 
 
 from snake_models import AdvancedSnakeNN, ResnetSnakeNN
+from loss_functions import huberPriorityLoss, PriorityLoss
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -58,7 +59,7 @@ class QTrainer:
         self.model_target_counter = 0
         self.model_target_cycle = 200 # ovo je jako bitno 
         self.model_target_cycle_mult = 1.2
-        self.model_target_max = 3000
+        self.model_target_max = 1500
 
     def train_step(self, map_state, metadata_state, action, reward, next_map_state, next_metadata_state, done, gamma_train,end_priority):
         self.model_target_update()
@@ -112,7 +113,7 @@ class QTrainer:
 
         # 3: Compute the loss
         self.optimizer.zero_grad()
-        loss = self.criterion(target, pred)
+        loss = self.criterion(target, pred, end_priority)
         
         loss.backward()
         self.optimizer.step()
@@ -146,7 +147,7 @@ LR = 0.0005
 # --- Agent Class ---
 class Agent:
 
-    def __init__(self, model, optimizer ,train = True,n_step_remember=1, gamma=0.93,end_priority = 1):
+    def __init__(self, model, optimizer ,criterion = nn.MSELoss() ,train = True,n_step_remember=1, gamma=0.93,end_priority = 1):
         """
         Initializes the Agent.
 
@@ -170,7 +171,7 @@ class Agent:
         # Obavezno sinkronizirajte težine na početku!
         self.model_target.load_state_dict(self.model.state_dict())
 
-        self.trainer = QTrainer(self.model,self.model_target, optimizer=optimizer, lr = LR,gamma=gamma)
+        self.trainer = QTrainer(self.model,self.model_target, criterion= criterion, optimizer=optimizer, lr = LR,gamma=gamma)
 
         
         self.counter= 0 

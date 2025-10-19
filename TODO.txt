@@ -1,1 +1,1 @@
-zelim dodati veci loss na igre blizu kraja
+reduce lr on plateu 

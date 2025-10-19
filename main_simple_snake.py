@@ -69,11 +69,12 @@ if not os.path.exists(CHECKPOINT_FOLDER):
 for a in [1,2,3]:
     file_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
     log_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
-    log_path_simple = os.path.join(CHECKPOINT_FOLDER, f'save_advanced_simle_resnet_log_n{a}.csv')
+    log_path_simple = os.path.join(CHECKPOINT_FOLDER, f'save_simple_snake_log_n3_priority{a}.csv')
+    file_path_simple = os.path.join(CHECKPOINT_FOLDER, f'save_simple_snake_n3_priority{a}.pth')
 
     agent1 = SimpleSnakeAgent(n_step_remember=a, gamma=0.80)
 
-    num_games = 8000
+    num_games = 10000
 
     logger = CSVLogger(log_path_simple, fieldnames=[
         "game", "sum_reward", "avg_count",
@@ -133,8 +134,8 @@ for a in [1,2,3]:
         avg_count = (count)*0.01 + avg_count*0.99
         moving_avg = (sum_reward/count)*0.01 + moving_avg*0.99
         loss_moving_avg = (sum_loss / (sum_count if sum_count else 1)) * 0.01 + loss_moving_avg*0.99
-    #   if((i+1)%500==0 and i >100):
-    #       agent1.save_agent_state(file_path_simple)
+        if((i+1)%500==0 and i >100):
+           agent1.save_agent_state(file_path_simple)
         
         n_games, epsilon, lr = agent1.get_model_state()
 
