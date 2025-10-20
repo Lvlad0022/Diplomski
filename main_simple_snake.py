@@ -66,13 +66,14 @@ if not os.path.exists(CHECKPOINT_FOLDER):
 
 # Definiraj relativne putanje za spremanje koristeći os.path.join
 # Ovo će stvoriti putanje poput 'model_checkpoints/save_agent.pth'
-for a in [1,2,3]:
+for a,b in [ (1,0.75), (2,0.9), (2,0.8),(3,0.85)]:
     file_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
     log_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
-    log_path_simple = os.path.join(CHECKPOINT_FOLDER, f'save_simple_snake_log_n3_priority{a}.csv')
-    file_path_simple = os.path.join(CHECKPOINT_FOLDER, f'save_simple_snake_n3_priority{a}.pth')
+    log_path_simple = os.path.join(CHECKPOINT_FOLDER, f'save_simple_snake_log_n3_priority{a}_gamma{b}.csv')
+    file_path_simple = os.path.join(CHECKPOINT_FOLDER, f'save_simple_snake_n3_priority{a}_gamma{b}.pth')
 
-    agent1 = SimpleSnakeAgent(n_step_remember=a, gamma=0.80)
+    agent1 = SimpleSnakeAgent(n_step_remember=a, gamma=b)
+    agent1.load_agent_state(str = r"C:\Users\lovro\Desktop\AIBG-9.0-master\simple_snake_game_models\pretrained_net.pth")
 
     num_games = 10000
 

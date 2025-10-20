@@ -59,7 +59,7 @@ class QTrainer:
         self.model_target_counter = 0
         self.model_target_cycle = 200 # ovo je jako bitno 
         self.model_target_cycle_mult = 1.2
-        self.model_target_max = 1500
+        self.model_target_max = 3000
 
     def train_step(self, map_state, metadata_state, action, reward, next_map_state, next_metadata_state, done, gamma_train,end_priority):
         self.model_target_update()
@@ -131,6 +131,52 @@ class QTrainer:
 
 
 
+class RewardPropReplayBuffer:
+    def __init__(self,priority_mult = 2, capacity=100_000, gamma=0.93, n_step_remember = 1):
+        self.buffer = []
+        self.priorities = []
+        self.predecesor = []
+        self.gamma = gamma
+        self.capacity = capacity
+        self.counter = 0
+        self.n_step = n_step_remember
+        self.priority_mult = priority_mult
+
+    def push(self, experience, reward, predecesor): #tu treba samo paziti da predecesor bude false na prvih n_step_remember stanja u novoj igri
+        priority = 1 + self.priority_mult * reward  
+        if len(self.buffer) < self.capacity:
+            self.buffer.append(experience)
+            self.priorities.append(priority)
+            if predecesor:
+                self.predecesor.append(len(self.buffer)-1 - self.n_step)
+        else:
+            self.buffer[self.counter] = experience
+            self.priorities[self.counter] = priority
+            if predecesor:
+                self.predecesor[self.counter] = (self.counter - self.n_step) % self.capacity
+            self.counter = (self.counter+1) % self.capacity
+
+    def sample(self, batch_size):
+        # pretvori prioritete u vjerojatnosti
+        p = np.maximum(np.array(self.priorities), 0) + 1e-6
+        probs = p / p.sum()
+        idxs = np.random.choice(len(    ), batch_size, p=probs)
+        samples = [self.buffer[i] for i in idxs]
+        return samples, idxs
+
+    def update_after_train(self, indices, rewards):
+        for idx, r in zip(indices, rewards):
+            # smanji trenirano stanje
+            self.priorities[idx] *= self.gamma**2
+
+            # propagiraj reward unazad ako postoji prethodnik
+            if idx > 0:
+                self.priorities[self.predecesor[idx]] += r * self.gamma
+
+        # osiguraj da prioriteti ne postanu negativni ili preveliki
+        self.priorities = deque(np.clip(self.priorities, 0, 10), maxlen=self.buffer.maxlen)
+
+
 
 
 
@@ -147,7 +193,7 @@ LR = 0.0005
 # --- Agent Class ---
 class Agent:
 
-    def __init__(self, model, optimizer ,criterion = nn.MSELoss() ,train = True,n_step_remember=1, gamma=0.93,end_priority = 1):
+    def __init__(self, model, optimizer ,criterion = nn.MSELoss() ,train = True,n_step_remember=1, gamma=0.93,end_priority = False):
         """
         Initializes the Agent.
 
@@ -162,8 +208,12 @@ class Agent:
         self.epsilon = 0.9           # Početna vrijednost
         self.epsilon_min = 0.05      # Minimalna vrijednost
         self.epsilon_decay = 0.9995 
-        self.memory = deque(maxlen=MAX_MEMORY) # popleft()
+        if end_priority:
+            self.memory =RewardPropReplayBuffer(priority_mult = end_priority, capacity=MAX_MEMORY, gamma= gamma, n_step_remember=n_step_remember) 
+        else:
+            self.memory = deque(maxlen=MAX_MEMORY) # popleft()
         self.end_priority = end_priority
+        self.episode_count = 0
 
         # --- Use the AdvancedSnakeNN model --
         self.model = model.to(DEVICE)
@@ -321,23 +371,38 @@ class Agent:
 
         next_map_state, next_metadata_state = self.get_state(data_novi)
         done = 1 if data_novi.get("winner") is not None else 0
+
+        predecesor =True
+        if(self.episode_count < self.n_step_remember):
+            predecesor = False
         
         if done:
             gamma_train = self.gamma ** (len(self.rewards))
             while not len(self.remember_data) == 0:
-                map_state, metadata_state,action = self.remember_data.popleft()
-                self.memory.append((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, gamma_train, self.end_priority))
-                gamma_train = gamma_train / self.gamma
-                reward = self.rewards.popleft()
-                self.rewards_average = (self.rewards_average - reward) / self.gamma
+                if self.end_priority:
+                    self.memory.push((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, gamma_train), self.rewards_average, predecesor)
+                    gamma_train = gamma_train / self.gamma
+                    reward = self.rewards.popleft()
+                    self.rewards_average = (self.rewards_average - reward) / self.gamma
+                else:
+                    map_state, metadata_state,action = self.remember_data.popleft()
+                    self.memory.append((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, gamma_train, self.end_priority))
+                    gamma_train = gamma_train / self.gamma
+                    reward = self.rewards.popleft()
+                    self.rewards_average = (self.rewards_average - reward) / self.gamma
             self.rewards_average = 0
+            self.episode_count = 0
             
 
         elif len(self.rewards) == self.n_step_remember:
-            map_state, metadata_state,action = self.remember_data.popleft()
-            self.memory.append((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done,self.gamma ** self.n_step_remember, 1))
-            reward = self.rewards.popleft()
-            self.rewards_average = (self.rewards_average - reward) / self.gamma
+            if self.end_priority:
+                self.memory.push((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done,self.gamma ** self.n_step_remember), self.rewards_average, predecesor)
+            else:
+                map_state, metadata_state, action = self.remember_data.popleft()
+                self.memory.append((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done,self.gamma ** self.n_step_remember, 1))
+                reward = self.rewards.popleft()
+                self.rewards_average = (self.rewards_average - reward) / self.gamma
+            self.episode_count += 1
 
     def train_long_term(self):
         """Trains the model using a batch of experiences from the memory."""
