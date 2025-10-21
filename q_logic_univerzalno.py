@@ -4,6 +4,8 @@ import sys
 import random
 import time
 import traceback
+import copy
+
 
 import torch
 import random
@@ -61,7 +63,7 @@ class QTrainer:
         self.model_target_cycle_mult = 1.2
         self.model_target_max = 3000
 
-    def train_step(self, map_state, metadata_state, action, reward, next_map_state, next_metadata_state, done, gamma_train,end_priority):
+    def train_step(self, map_state, metadata_state, action, reward, next_map_state, next_metadata_state, done, gamma_train):
         self.model_target_update()
         # Ensure inputs are tensors and have the correct data types
         map_state = map_state.float().to(DEVICE)
@@ -72,7 +74,6 @@ class QTrainer:
         next_metadata_state = next_metadata_state.float().to(DEVICE)
         done = done.bool().to(DEVICE) 
         gamma_train = gamma_train.float().to(DEVICE)
-        end_priority = end_priority.float().to(DEVICE)
 
 
         # If only a single experience is provided, add a batch dimension
@@ -85,7 +86,6 @@ class QTrainer:
              next_map_state = torch.unsqueeze(next_map_state, 0) # -> (1, C, H, W)
              next_metadata_state = torch.unsqueeze(next_metadata_state, 0) # -> (1, metadata_dim)
              done = torch.unsqueeze(done, 0) # -> (1,)
-             end_priority = torch.unsqueeze(end_priority, 0)
         # Else: Assume it's already a batch: (B, C, H, W), (B, metadata_dim), etc.
 
 
@@ -113,7 +113,7 @@ class QTrainer:
 
         # 3: Compute the loss
         self.optimizer.zero_grad()
-        loss = self.criterion(target, pred, end_priority)
+        loss = self.criterion(target, pred)
         
         loss.backward()
         self.optimizer.step()
@@ -129,13 +129,11 @@ class QTrainer:
             self.model_target.load_state_dict(self.model.state_dict())
 
 
-
-
 class RewardPropReplayBuffer:
     def __init__(self,priority_mult = 2, capacity=100_000, gamma=0.93, n_step_remember = 1):
         self.buffer = []
         self.priorities = []
-        self.predecesor = []
+        self.predecesor = [None] * capacity
         self.gamma = gamma
         self.capacity = capacity
         self.counter = 0
@@ -143,24 +141,31 @@ class RewardPropReplayBuffer:
         self.priority_mult = priority_mult
 
     def push(self, experience, reward, predecesor): #tu treba samo paziti da predecesor bude false na prvih n_step_remember stanja u novoj igri
-        priority = 1 + self.priority_mult * reward  
+        
+        priority = 1 + self.priority_mult * reward #priority ovisno o velicini nagrade, tako da se updateaju informativna stanja 
         if len(self.buffer) < self.capacity:
             self.buffer.append(experience)
             self.priorities.append(priority)
-            if predecesor:
-                self.predecesor.append(len(self.buffer)-1 - self.n_step)
+
+            if predecesor and len(self.buffer) > self.n_step:
+                self.predecesor[self.counter] = (self.counter - self.n_step) % self.capacity
+            else:
+                self.predecesor[self.counter] = None
+            self.counter = (self.counter+1) % self.capacity
         else:
             self.buffer[self.counter] = experience
             self.priorities[self.counter] = priority
             if predecesor:
                 self.predecesor[self.counter] = (self.counter - self.n_step) % self.capacity
+            self.predecesor[(self.counter + self.n_step) % self.capacity] = False #succersor of stte previously occupied in this postion no longer has predecesor
+
             self.counter = (self.counter+1) % self.capacity
 
     def sample(self, batch_size):
         # pretvori prioritete u vjerojatnosti
         p = np.maximum(np.array(self.priorities), 0) + 1e-6
         probs = p / p.sum()
-        idxs = np.random.choice(len(    ), batch_size, p=probs)
+        idxs = np.random.choice(len(self.buffer ), batch_size, p=probs)
         samples = [self.buffer[i] for i in idxs]
         return samples, idxs
 
@@ -170,12 +175,13 @@ class RewardPropReplayBuffer:
             self.priorities[idx] *= self.gamma**2
 
             # propagiraj reward unazad ako postoji prethodnik
-            if idx > 0:
+            if self.predecesor[idx]:
                 self.priorities[self.predecesor[idx]] += r * self.gamma
 
         # osiguraj da prioriteti ne postanu negativni ili preveliki
-        self.priorities = deque(np.clip(self.priorities, 0, 10), maxlen=self.buffer.maxlen)
-
+        #self.priorities = deque(np.clip(self.priorities, 0, 10), maxlen=self.buffer.maxlen)
+    def __len__(self):
+        return len(self.buffer)
 
 
 
@@ -217,9 +223,10 @@ class Agent:
 
         # --- Use the AdvancedSnakeNN model --
         self.model = model.to(DEVICE)
-        self.model_target = model.to(DEVICE)
-        # Obavezno sinkronizirajte težine na početku!
+        self.model_target =  copy.deepcopy(model).to(DEVICE)
         self.model_target.load_state_dict(self.model.state_dict())
+        self.model_target.eval() 
+        # Obavezno sinkronizirajte težine na početku!
 
         self.trainer = QTrainer(self.model,self.model_target, criterion= criterion, optimizer=optimizer, lr = LR,gamma=gamma)
 
@@ -329,37 +336,7 @@ class Agent:
     def change_weights(self, other):
         self.model.load_state_dict(other.model.state_dict())
 
-    '''
-    def dead_from_hitting_the_wall(self, previous_head_pos, move_direction, game_map):
-        fatal_pos = previous_head_pos.copy() # Napravi kopiju da ne mijenjaš original
-        if move_direction == 'up':
-            fatal_pos['row'] -= 1
-        elif move_direction == 'down':
-            fatal_pos['row'] += 1
-        elif move_direction == 'left':
-            fatal_pos['column'] -= 1
-        elif move_direction == 'right':
-            fatal_pos['column'] += 1
-
-        # 2. Provjeri je li pozicija izvan granica mape
-        rows, cols = len(game_map), len(game_map[0])
-        if not (0 <= fatal_pos['row'] < rows and 0 <= fatal_pos['column'] < cols):
-            return "WALL_COLLISION_OUT_OF_BOUNDS" # Igrač je izašao izvan mape
-
-        # 3. Provjeri što se nalazi na ćeliji sudara
-        cell_content = game_map[fatal_pos['row']][fatal_pos['column']]
-        
-        if cell_content and cell_content.get('type') == 'border':
-            return 0
-            
-        if cell_content and cell_content.get('type') == 'snake-body':
-            return 1
-            
-        if cell_content and cell_content.get('type') == 'snake-head':
-            return 2
-            
-        return 3
-    '''
+    
 
     def remember(self, data, data_novi):
         map_state, metadata_state = self.get_state(data) 
@@ -380,13 +357,14 @@ class Agent:
             gamma_train = self.gamma ** (len(self.rewards))
             while not len(self.remember_data) == 0:
                 if self.end_priority:
-                    self.memory.push((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, gamma_train), self.rewards_average, predecesor)
+                    map_state, metadata_state,action = self.remember_data.popleft()
+                    self.memory.push((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, gamma_train),self.rewards_average, predecesor)
                     gamma_train = gamma_train / self.gamma
                     reward = self.rewards.popleft()
                     self.rewards_average = (self.rewards_average - reward) / self.gamma
                 else:
                     map_state, metadata_state,action = self.remember_data.popleft()
-                    self.memory.append((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, gamma_train, self.end_priority))
+                    self.memory.append((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, gamma_train))
                     gamma_train = gamma_train / self.gamma
                     reward = self.rewards.popleft()
                     self.rewards_average = (self.rewards_average - reward) / self.gamma
@@ -396,10 +374,13 @@ class Agent:
 
         elif len(self.rewards) == self.n_step_remember:
             if self.end_priority:
+                map_state, metadata_state,action = self.remember_data.popleft()
                 self.memory.push((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done,self.gamma ** self.n_step_remember), self.rewards_average, predecesor)
+                reward = self.rewards.popleft()
+                self.rewards_average = (self.rewards_average - reward) / self.gamma
             else:
                 map_state, metadata_state, action = self.remember_data.popleft()
-                self.memory.append((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done,self.gamma ** self.n_step_remember, 1))
+                self.memory.append((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done,self.gamma ** self.n_step_remember))
                 reward = self.rewards.popleft()
                 self.rewards_average = (self.rewards_average - reward) / self.gamma
             self.episode_count += 1
@@ -411,12 +392,19 @@ class Agent:
 
         
         if not len(self.memory) <1000 :
-            mini_sample = random.sample(self.memory, BATCH_SIZE) 
+            if isinstance(self.memory, RewardPropReplayBuffer):
+                mini_sample, idxs = self.memory.sample(BATCH_SIZE)
+            else:
+                mini_sample = random.sample(list(self.memory), BATCH_SIZE)
+                idxs = None  # nema updatea prioriteta
+
             
 
             # Unpack the samples into separate lists
-            map_states, metadata_states, actions, rewards, next_map_states, next_metadata_states, dones,gamma_train, end_priority = zip(*mini_sample)
-
+            map_states, metadata_states, actions, rewards, next_map_states, next_metadata_states, dones,gamma_train = zip(*mini_sample)
+            
+            if isinstance(self.memory, RewardPropReplayBuffer):
+                self.memory.update_after_train(idxs,rewards)
             # Convert lists of numpy arrays to tensors
             map_states = torch.tensor(np.array(map_states), dtype=torch.float)
             metadata_states = torch.tensor(np.array(metadata_states), dtype=torch.float)
@@ -426,11 +414,10 @@ class Agent:
             next_metadata_states = torch.tensor(np.array(next_metadata_states), dtype=torch.float)
             dones = torch.tensor(np.array(dones), dtype=torch.bool) # Done flags are boolean
             gamma_train = torch.tensor(np.array(gamma_train), dtype=torch.float)
-            end_priority = torch.tensor(np.array(end_priority), dtype=torch.float)
 
             # --- Call the trainer with separate inputs ---
             # You need to modify your QTrainer.train_step to accept these
-            loss =self.trainer.train_step(map_states, metadata_states, actions, rewards, next_map_states, next_metadata_states, dones,gamma_train, end_priority)
+            loss =self.trainer.train_step(map_states, metadata_states, actions, rewards, next_map_states, next_metadata_states, dones,gamma_train)
             #print("Training long memory batch...") # Placeholder
             return loss
         return 0
@@ -471,14 +458,11 @@ class Agent:
 
             # Get prediction from the model
             
-            self.model_target.eval()
-            with torch.no_grad(): # No gradient calculation during inference
-                prediction = self.model_target(map_state_tensor, metadata_state_tensor).cpu()
-            # Set model back to training mode after inference
-            self.model_target.train()
-            # Get the action with the highest predicted Q-val
-            # ue
-            #mjere = (torch.max(prediction), torch.min(prediction), torch.mean(predition))
+            
+            self.model.eval()
+            with torch.no_grad():
+                prediction = self.model(map_state_tensor, metadata_state_tensor).cpu()
+            self.model.train()            # Set model back to training mode after inference
             move = torch.argmax(prediction).item()
             final_move[move] = 1
             move_direction = VALID_DIRECTIONS[move]

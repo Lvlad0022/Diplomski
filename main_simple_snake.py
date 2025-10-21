@@ -66,14 +66,14 @@ if not os.path.exists(CHECKPOINT_FOLDER):
 
 # Definiraj relativne putanje za spremanje koristeći os.path.join
 # Ovo će stvoriti putanje poput 'model_checkpoints/save_agent.pth'
-for a,b in [ (1,0.75), (2,0.9), (2,0.8),(3,0.85)]:
+for a,b in [ (False,0.85),(0.5,0.85),(1,0.85)]:
     file_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
     log_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
     log_path_simple = os.path.join(CHECKPOINT_FOLDER, f'save_simple_snake_log_n3_priority{a}_gamma{b}.csv')
     file_path_simple = os.path.join(CHECKPOINT_FOLDER, f'save_simple_snake_n3_priority{a}_gamma{b}.pth')
 
-    agent1 = SimpleSnakeAgent(n_step_remember=a, gamma=b)
-    agent1.load_agent_state(str = r"C:\Users\lovro\Desktop\AIBG-9.0-master\simple_snake_game_models\pretrained_net.pth")
+    agent1 = SimpleSnakeAgent(n_step_remember=3, gamma=b, end_priority= a)
+    #agent1.load_agent_state(str = r"C:\Users\lovro\Desktop\AIBG-9.0-master\simple_snake_game_models\pretrained_net.pth")
 
     num_games = 10000
 
@@ -135,8 +135,8 @@ for a,b in [ (1,0.75), (2,0.9), (2,0.8),(3,0.85)]:
         avg_count = (count)*0.01 + avg_count*0.99
         moving_avg = (sum_reward/count)*0.01 + moving_avg*0.99
         loss_moving_avg = (sum_loss / (sum_count if sum_count else 1)) * 0.01 + loss_moving_avg*0.99
-        if((i+1)%500==0 and i >100):
-           agent1.save_agent_state(file_path_simple)
+#        if((i+1)%500==0 and i >100):
+#           agent1.save_agent_state(file_path_simple)
         
         n_games, epsilon, lr = agent1.get_model_state()
 

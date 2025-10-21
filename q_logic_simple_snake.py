@@ -2,7 +2,7 @@ import numpy as np
 from q_logic_univerzalno import Agent
 import torch.optim as optim
 from simple_snake_models import SimpleSnakeNN, ResnetSnakeNN_Small, AdvancedSimpleSnakeNN
-from loss_functions import huberPriorityLoss
+from loss_functions import huberPriorityLoss, huberLoss
 
 move_names = {"up": 0, # Changed to 0, 1, 2 to match typical 3-action output (straight, right, left)
               "right": 1,
@@ -15,17 +15,24 @@ move_names = {"up": 0, # Changed to 0, 1, 2 to match typical 3-action output (st
 
 
 class SimpleSnakeAgent(Agent):
-    def __init__(self, train = True,n_step_remember=1, gamma=0.93, end_priority = 1):
+    def __init__(self, train = True,n_step_remember=1, gamma=0.93, end_priority = False):
         model = SimpleSnakeNN()
         optimizer = optim.Adam(model.parameters(),lr=5e-4) 
-        super().__init__(model = model, optimizer = optimizer, criterion= huberPriorityLoss(), train = train, n_step_remember=n_step_remember, end_priority=end_priority)  # pozove konstruktor od Agent
+        super().__init__(model = model, optimizer = optimizer, criterion= huberLoss(), train = train, n_step_remember=n_step_remember, end_priority=end_priority)  # pozove konstruktor od Agent
         print("SimpleSnakeAgent initialized!")
   
+    def divide_lr(self,mult=3):
+        
+        for param_group in self.trainer.optimizer.param_groups:
+            param_group['lr'] /= mult
+            print(f"Learning rate changed to: {param_group['lr']}")
+
     def change_lr(self,lr):
         
         for param_group in self.trainer.optimizer.param_groups:
             param_group['lr'] = lr
-        print(f"Learning rate changed to: {lr}")
+            print(f"Learning rate changed to: {param_group['lr']}")
+
 
     def give_reward(self, data_novi, data, akcija):
             winner = data_novi.get("winner")
