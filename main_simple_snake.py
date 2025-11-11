@@ -66,95 +66,104 @@ if not os.path.exists(CHECKPOINT_FOLDER):
 
 # Definiraj relativne putanje za spremanje koristeći os.path.join
 # Ovo će stvoriti putanje poput 'model_checkpoints/save_agent.pth'
-for a,b in [ (False,0.85),(0.5,0.85),(1,0.85)]:
-    file_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
-    log_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
-    log_path_simple = os.path.join(CHECKPOINT_FOLDER, f'save_simple_snake_log_n3_priority{a}_gamma{b}.csv')
-    file_path_simple = os.path.join(CHECKPOINT_FOLDER, f'save_simple_snake_n3_priority{a}_gamma{b}.pth')
+for memory in range(2,8):
+    for b in[0.85,0.93]:
+        file_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
+        log_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
+        log_path_simple = os.path.join(CHECKPOINT_FOLDER, f'save_simple_snake_log_n3_memory{memory}_gamma{b}.csv')
 
-    agent1 = SimpleSnakeAgent(n_step_remember=3, gamma=b, end_priority= a)
-    #agent1.load_agent_state(str = r"C:\Users\lovro\Desktop\AIBG-9.0-master\simple_snake_game_models\pretrained_net.pth")
+        agent1 = SimpleSnakeAgent(n_step_remember=3, gamma=b, memory= memory)
+        #agent1.load_agent_state(str = r"C:\Users\lovro\Desktop\AIBG-9.0-master\simple_snake_game_models\pretrained_net.pth")
 
-    num_games = 10000
+        num_games = 8000
 
-    logger = CSVLogger(log_path_simple, fieldnames=[
-        "game", "sum_reward", "avg_count",
-         "loss_moving_avg", "epsilon", "learning_rate", "num_moves"
-    ])
-    avg_count = 0
-    moving_avg = 0
-    win_pct = 0
-    loss_moving_avg= 0
-    for i in range(num_games):
-        game = SnakeGame()
-        game.add_player({"id": id1, "name": name1})
+        logger = CSVLogger(log_path_simple, fieldnames=[
+            "game", "vrijeme_izvodenja", "vrijeme_treniranja", "sum_reward", "avg_count",
+            "loss_moving_avg", "epsilon", "learning_rate", "num_moves"    ])
+        avg_count = 0
+        moving_avg = 0
+        win_pct = 0
+        loss_moving_avg= 0
+        for i in range(num_games):
+            game = SnakeGame()
+            game.add_player({"id": id1, "name": name1})
 
 
-        GameOver = False
+            GameOver = False
 
-        data = serialize_game_state(game)
-        sum_reward = 0
+            data = serialize_game_state(game)
+            sum_reward = 0
 
-        avg_loss = 0
-        sum_loss = 0
-        
-        vrijeme1 = 0
-        vrijeme2 = 0
+            avg_loss = 0
+            sum_loss = 0
+            
+            vrijeme1 = 0
+            vrijeme2 = 0
 
-        if(i == 2500):
-            agent1.change_lr(0.0001)
-        if(i == 4500):
-            agent1.change_lr(0.00005)
-        if(i == 6500):
-            agent1.change_lr(0.00001)
+            if(i == 2500):
+                agent1.change_lr(0.0001)
+            if(i == 4500):
+                agent1.change_lr(0.00005)
+            if(i == 6500):
+                agent1.change_lr(0.00001)
 
-        sum_count = 0        
-        count = 0
-        while not GameOver:
-            count+= 1
-            moves = {"playerId": id1 , "direction": agent1.get_action(data)}
-            game.process_moves(moves)
+            sum_count = 0        
+            count = 0
+            while not GameOver:
+                count+= 1
+                a = time.time()
+                moves = {"playerId": id1 , "direction": agent1.get_action(data)}
+                vrijeme1 += time.time() - a
+                game.process_moves(moves)
 
-            novi_data = serialize_game_state(game)
-            reward = agent1.give_reward(novi_data, data, None)
-            sum_reward += reward
+                novi_data = serialize_game_state(game)
+                reward,done = agent1.give_reward(novi_data, data, None)
+                sum_reward += reward
 
-            p = random.randint(0,1)
-            if(i < 4000 or p < granica(count,avg_count) ):
-                agent1.remember(data,novi_data)
+                p = random.randint(0,1)
+                if(i < 4000 or p < granica(count,avg_count) ):
+                    agent1.remember(data,novi_data)
 
-            if(count%8 == 0 and i >5):
-                sum_count += 1
-                sum_loss += agent1.train_long_term()
+                if(count%8 == 0 and i >5):
+                    sum_count += 1
+                    a = time.time()
+                    sum_loss += agent1.train_long_term()
+                    vrijeme2 += time.time() - a
 
-            data = novi_data
-            GameOver = game.check_game_over()
+                data = novi_data
+                GameOver = game.check_game_over()
 
-        #sum_loss += agent1.train_long_term()
+            #sum_loss += agent1.train_long_term()
 
-        avg_count = (count)*0.01 + avg_count*0.99
-        moving_avg = (sum_reward/count)*0.01 + moving_avg*0.99
-        loss_moving_avg = (sum_loss / (sum_count if sum_count else 1)) * 0.01 + loss_moving_avg*0.99
-#        if((i+1)%500==0 and i >100):
-#           agent1.save_agent_state(file_path_simple)
-        
-        n_games, epsilon, lr = agent1.get_model_state()
+            avg_count = (count)*0.01 + avg_count*0.99
+            moving_avg = (sum_reward/count)*0.01 + moving_avg*0.99
+            loss_moving_avg = (sum_loss / (sum_count if sum_count else 1)) * 0.01 + loss_moving_avg*0.99
+            vrijeme_treniranja = vrijeme2/(sum_count if sum_count else 1)
 
-        print(f"igra: {i}")
-        print(f"sum_reward: {moving_avg}")
-        print(f"avg count:{avg_count}")
-        print(f"loss moving_avg: {loss_moving_avg}")
-        print(f"epsilon: {epsilon}")
-        print(f"learning rate: {lr}")
-        print(f"broj_poteza{count}")
-        logger.log({
-            "game": i,
-            "sum_reward": moving_avg,
-            "avg_count": avg_count,
-            "loss_moving_avg": loss_moving_avg,
-            "epsilon": epsilon,
-            "learning_rate": lr,
-            "num_moves": count,
-        })
+    #        if((i+1)%500==0 and i >100):
+    #           agent1.save_agent_state(file_path_simple)
+            
+            n_games, epsilon, lr = agent1.get_model_state()
+
+            print(f"igra: {i}")
+            print(f"vrijeme izvođenja: {vrijeme1/count}")
+            print(f"vrijeme treniranja: {vrijeme_treniranja}")
+            print(f"sum_reward: {moving_avg}")
+            print(f"avg count:{avg_count}")
+            print(f"loss moving_avg: {loss_moving_avg}")
+            print(f"epsilon: {epsilon}")
+            print(f"learning rate: {lr}")
+            print(f"broj_poteza{count}")
+            logger.log({
+                "game": i,
+                "vrijeme_izvodenja": vrijeme1/count,
+                "vrijeme_treniranja": vrijeme_treniranja,
+                "sum_reward": moving_avg,
+                "avg_count": avg_count,
+                "loss_moving_avg": loss_moving_avg,
+                "epsilon": epsilon,
+                "learning_rate": lr,
+                "num_moves": count,
+            })
 
 

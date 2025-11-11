@@ -29,7 +29,8 @@ from collections import deque
 
 
 from snake_models import AdvancedSnakeNN, ResnetSnakeNN
-from loss_functions import huberPriorityLoss, PriorityLoss
+from loss_functions import huberLoss
+from q_logic_memory_classes import TDPriorityReplayBuffer, ReplayBuffer, RewardPriorityReplayBuffer
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -63,7 +64,7 @@ class QTrainer:
         self.model_target_cycle_mult = 1.2
         self.model_target_max = 3000
 
-    def train_step(self, map_state, metadata_state, action, reward, next_map_state, next_metadata_state, done, gamma_train):
+    def train_step(self, map_state, metadata_state, action, reward, next_map_state, next_metadata_state, done, gamma_train,weights):
         self.model_target_update()
         # Ensure inputs are tensors and have the correct data types
         map_state = map_state.float().to(DEVICE)
@@ -74,6 +75,8 @@ class QTrainer:
         next_metadata_state = next_metadata_state.float().to(DEVICE)
         done = done.bool().to(DEVICE) 
         gamma_train = gamma_train.float().to(DEVICE)
+        weights = weights.float().to(DEVICE)
+
 
 
         # If only a single experience is provided, add a batch dimension
@@ -113,13 +116,25 @@ class QTrainer:
 
         # 3: Compute the loss
         self.optimizer.zero_grad()
-        loss = self.criterion(target, pred)
+
+        action_indices = torch.argmax(action, dim=1)  # (B,)
+        pred_a = pred.gather(1, action_indices.unsqueeze(1)).squeeze(1)
+        target_a = target.gather(1, action_indices.unsqueeze(1)).squeeze(1)
+
+
+        loss = self.criterion(target_a, pred_a, weights)
         
+        td_errors = np.abs((target_a - pred_a).detach().cpu().numpy().squeeze())
+        
+        
+
+
         loss.backward()
         self.optimizer.step()
         if self.scheduler:
             self.scheduler.step()
-        return float(loss)
+        return float(loss), td_errors
+
 
     def model_target_update(self):
         self.model_target_counter += 1
@@ -128,78 +143,15 @@ class QTrainer:
             self.model_target_counter = 0
             self.model_target.load_state_dict(self.model.state_dict())
 
-
-class RewardPropReplayBuffer:
-    def __init__(self,priority_mult = 2, capacity=100_000, gamma=0.93, n_step_remember = 1):
-        self.buffer = []
-        self.priorities = []
-        self.predecesor = [None] * capacity
-        self.gamma = gamma
-        self.capacity = capacity
-        self.counter = 0
-        self.n_step = n_step_remember
-        self.priority_mult = priority_mult
-
-    def push(self, experience, reward, predecesor): #tu treba samo paziti da predecesor bude false na prvih n_step_remember stanja u novoj igri
-        
-        priority = 1 + self.priority_mult * reward #priority ovisno o velicini nagrade, tako da se updateaju informativna stanja 
-        if len(self.buffer) < self.capacity:
-            self.buffer.append(experience)
-            self.priorities.append(priority)
-
-            if predecesor and len(self.buffer) > self.n_step:
-                self.predecesor[self.counter] = (self.counter - self.n_step) % self.capacity
-            else:
-                self.predecesor[self.counter] = None
-            self.counter = (self.counter+1) % self.capacity
-        else:
-            self.buffer[self.counter] = experience
-            self.priorities[self.counter] = priority
-            if predecesor:
-                self.predecesor[self.counter] = (self.counter - self.n_step) % self.capacity
-            self.predecesor[(self.counter + self.n_step) % self.capacity] = False #succersor of stte previously occupied in this postion no longer has predecesor
-
-            self.counter = (self.counter+1) % self.capacity
-
-    def sample(self, batch_size):
-        # pretvori prioritete u vjerojatnosti
-        p = np.maximum(np.array(self.priorities), 0) + 1e-6
-        probs = p / p.sum()
-        idxs = np.random.choice(len(self.buffer ), batch_size, p=probs)
-        samples = [self.buffer[i] for i in idxs]
-        return samples, idxs
-
-    def update_after_train(self, indices, rewards):
-        for idx, r in zip(indices, rewards):
-            # smanji trenirano stanje
-            self.priorities[idx] *= self.gamma**2
-
-            # propagiraj reward unazad ako postoji prethodnik
-            if self.predecesor[idx]:
-                self.priorities[self.predecesor[idx]] += r * self.gamma
-
-        # osiguraj da prioriteti ne postanu negativni ili preveliki
-        #self.priorities = deque(np.clip(self.priorities, 0, 10), maxlen=self.buffer.maxlen)
-    def __len__(self):
-        return len(self.buffer)
-
-
-
-
-
 # --- Constants ---
 MAX_MEMORY = 100_000
 BATCH_SIZE = 32
 LR = 0.0005
 
-# --- Item and Move Mappings ---
-# (Keep your existing mappings)
-
-
 # --- Agent Class ---
 class Agent:
 
-    def __init__(self, model, optimizer ,criterion = nn.MSELoss() ,train = True,n_step_remember=1, gamma=0.93,end_priority = False):
+    def __init__(self, model, optimizer ,criterion = huberLoss() ,train = True,n_step_remember=1, gamma=0.93,memory = ReplayBuffer()):
         """
         Initializes the Agent.
 
@@ -214,11 +166,8 @@ class Agent:
         self.epsilon = 0.9           # Početna vrijednost
         self.epsilon_min = 0.05      # Minimalna vrijednost
         self.epsilon_decay = 0.9995 
-        if end_priority:
-            self.memory =RewardPropReplayBuffer(priority_mult = end_priority, capacity=MAX_MEMORY, gamma= gamma, n_step_remember=n_step_remember) 
-        else:
-            self.memory = deque(maxlen=MAX_MEMORY) # popleft()
-        self.end_priority = end_priority
+        self.memory = memory 
+        
         self.episode_count = 0
 
         # --- Use the AdvancedSnakeNN model --
@@ -342,48 +291,31 @@ class Agent:
         map_state, metadata_state = self.get_state(data) 
         self.remember_data.append((map_state, metadata_state,self.last_action))
 
-        reward = self.give_reward(data_novi = data_novi,data = data, akcija = self.last_action)
+        reward,done = self.give_reward(data_novi = data_novi,data = data, akcija = self.last_action)
         self.rewards_average +=  self.gamma ** len(self.rewards) * reward 
         self.rewards.append(reward)
 
         next_map_state, next_metadata_state = self.get_state(data_novi)
-        done = 1 if data_novi.get("winner") is not None else 0
-
-        predecesor =True
-        if(self.episode_count < self.n_step_remember):
-            predecesor = False
         
         if done:
             gamma_train = self.gamma ** (len(self.rewards))
             while not len(self.remember_data) == 0:
-                if self.end_priority:
-                    map_state, metadata_state,action = self.remember_data.popleft()
-                    self.memory.push((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, gamma_train),self.rewards_average, predecesor)
-                    gamma_train = gamma_train / self.gamma
-                    reward = self.rewards.popleft()
-                    self.rewards_average = (self.rewards_average - reward) / self.gamma
-                else:
-                    map_state, metadata_state,action = self.remember_data.popleft()
-                    self.memory.append((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, gamma_train))
-                    gamma_train = gamma_train / self.gamma
-                    reward = self.rewards.popleft()
-                    self.rewards_average = (self.rewards_average - reward) / self.gamma
+                map_state, metadata_state,action = self.remember_data.popleft()
+                experience = (map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, self.gamma**self.n_step_remember)
+                self.memory.push(experience)
+                gamma_train = gamma_train / self.gamma
+                reward = self.rewards.popleft()
+                self.rewards_average = (self.rewards_average - reward) / self.gamma
             self.rewards_average = 0
-            self.episode_count = 0
             
 
         elif len(self.rewards) == self.n_step_remember:
-            if self.end_priority:
-                map_state, metadata_state,action = self.remember_data.popleft()
-                self.memory.push((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done,self.gamma ** self.n_step_remember), self.rewards_average, predecesor)
-                reward = self.rewards.popleft()
-                self.rewards_average = (self.rewards_average - reward) / self.gamma
-            else:
-                map_state, metadata_state, action = self.remember_data.popleft()
-                self.memory.append((map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done,self.gamma ** self.n_step_remember))
-                reward = self.rewards.popleft()
-                self.rewards_average = (self.rewards_average - reward) / self.gamma
-            self.episode_count += 1
+            map_state, metadata_state, action = self.remember_data.popleft()
+            experience = (map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, self.gamma**self.n_step_remember)
+            self.memory.push(experience)
+            reward = self.rewards.popleft()
+            self.rewards_average = (self.rewards_average - reward) / self.gamma
+            
 
     def train_long_term(self):
         """Trains the model using a batch of experiences from the memory."""
@@ -392,19 +324,13 @@ class Agent:
 
         
         if not len(self.memory) <1000 :
-            if isinstance(self.memory, RewardPropReplayBuffer):
-                mini_sample, idxs = self.memory.sample(BATCH_SIZE)
-            else:
-                mini_sample = random.sample(list(self.memory), BATCH_SIZE)
-                idxs = None  # nema updatea prioriteta
+            mini_sample, idxs, weights = self.memory.sample(BATCH_SIZE)
 
             
 
             # Unpack the samples into separate lists
             map_states, metadata_states, actions, rewards, next_map_states, next_metadata_states, dones,gamma_train = zip(*mini_sample)
             
-            if isinstance(self.memory, RewardPropReplayBuffer):
-                self.memory.update_after_train(idxs,rewards)
             # Convert lists of numpy arrays to tensors
             map_states = torch.tensor(np.array(map_states), dtype=torch.float)
             metadata_states = torch.tensor(np.array(metadata_states), dtype=torch.float)
@@ -414,11 +340,17 @@ class Agent:
             next_metadata_states = torch.tensor(np.array(next_metadata_states), dtype=torch.float)
             dones = torch.tensor(np.array(dones), dtype=torch.bool) # Done flags are boolean
             gamma_train = torch.tensor(np.array(gamma_train), dtype=torch.float)
+            weights = torch.tensor(np.array(weights), dtype=torch.float)
 
             # --- Call the trainer with separate inputs ---
             # You need to modify your QTrainer.train_step to accept these
-            loss =self.trainer.train_step(map_states, metadata_states, actions, rewards, next_map_states, next_metadata_states, dones,gamma_train)
+            loss, td =self.trainer.train_step(map_states, metadata_states, actions, rewards, next_map_states, next_metadata_states, dones,gamma_train, weights)
             #print("Training long memory batch...") # Placeholder
+
+            
+            self.memory.update_priorities(idxs, td)
+
+
             return loss
         return 0
 

@@ -148,6 +148,83 @@ class SimpleSnakeNN(nn.Module):
         return self.output(combined)
 
 
+
+class DuelingSimpleSnakeNN(nn.Module):
+    def __init__(self, map_channels=2, map_height=25, map_width=60,
+                 metadata_dim=7, num_actions=4):
+        super(DuelingSimpleSnakeNN, self).__init__()
+
+        # --- Convolutional Layers for Map Processing ---
+        self.conv_layers = nn.Sequential(
+            nn.Conv2d(map_channels, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d(2),  # (12x30)
+            
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(2),  # (6x15)
+            
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+        )
+
+        # Calculate flattened size dynamically
+        dummy_input = torch.randn(1, map_channels, map_height, map_width)
+        with torch.no_grad():
+            conv_out = self.conv_layers(dummy_input)
+            self._conv_out_size = conv_out.view(1, -1).shape[1]
+
+        # --- Metadata fully-connected layers ---
+        self.metadata_fc = nn.Sequential(
+            nn.Linear(metadata_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 128),
+            nn.ReLU(),
+        )
+        metadata_out = 128
+
+        # --- Combined FC layers ---
+        self.fc_value = nn.Sequential(
+            nn.Linear(self._conv_out_size + metadata_out, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 1)
+        )
+
+        self.fc_advantage = nn.Sequential(
+            nn.Linear(self._conv_out_size + metadata_out, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, num_actions)
+        )
+
+        # --- Output layer ---
+        
+
+    def forward(self, map_input, metadata_input):
+        map_input = map_input.to(DEVICE)
+        metadata_input = metadata_input.to(DEVICE)
+
+        x = self.conv_layers(map_input)
+        x = x.view(x.size(0), -1)
+        m = self.metadata_fc(metadata_input)
+        combined = torch.cat([x, m], dim=1)
+        value = self.fc_value(combined)
+        advantage = self.fc_advantage(combined)
+
+        Q =  value + (advantage - advantage.mean(dim=1, keepdim=True))
+        return Q
+
+
 from torchvision.models import resnet18, ResNet18_Weights
 
 class ResnetSnakeNN_Small(nn.Module):

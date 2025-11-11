@@ -38,12 +38,12 @@ class PriorityLoss(nn.Module):
             return weighted_loss  # bez redukcije
 
 
-class huberPriorityLoss(nn.Module):
+class huberLoss(nn.Module):
     def __init__(self, reduction='mean'):
-        super(huberPriorityLoss, self).__init__()
+        super(huberLoss, self).__init__()
         self.reduction = reduction  # 'mean' ili 'sum'
 
-    def forward(self, pred, target, priority):
+    def forward(self, pred, target, weights = None):
         """
         Args:
             pred (Tensor): model prediction, shape (batch_size, num_actions)
@@ -52,26 +52,16 @@ class huberPriorityLoss(nn.Module):
         Returns:
             Tensor: scalar loss (weighted MSE)
         """
-        # 1️⃣ Per-sample MSE po redu
-        diff = (target - pred)
-        loss_per_sample = torch.where(diff.abs() < 1.0, 0.5 * diff.pow(2), diff.abs() - 0.5).mean(dim=1)
 
-        # 2️⃣ Uvjeri se da su veličine kompatibilne
-        if priority.dim() == 1:
-            priority = priority.view(-1)  # flatten ako treba
-        assert loss_per_sample.shape == priority.shape, \
-            f"Shape mismatch: {loss_per_sample.shape} vs {priority.shape}"
-
-        # 3️⃣ Primijeni težine (prioritete)
-        weighted_loss = loss_per_sample * priority
-
-        # 4️⃣ Kombiniraj rezultate
-        if self.reduction == 'mean':
-            return weighted_loss.mean()
-        elif self.reduction == 'sum':
-            return weighted_loss.sum()
+        if weights != None:
+            diff = (target - pred) * weights
         else:
-            return weighted_loss  # bez redukcije
+            diff = (target - pred)
+            
+        loss = torch.where(diff.abs() < 1.0, 0.5 * diff.pow(2), diff.abs() - 0.5).mean()
+
+
+        return loss
 
 
 

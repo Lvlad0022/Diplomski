@@ -2,7 +2,8 @@ import numpy as np
 from q_logic_univerzalno import Agent
 import torch.optim as optim
 from simple_snake_models import SimpleSnakeNN, ResnetSnakeNN_Small, AdvancedSimpleSnakeNN
-from loss_functions import huberPriorityLoss, huberLoss
+from loss_functions import huberLoss
+from q_logic_memory_classes import ReplayBuffer, RewardPriorityReplayBuffer, TDPriorityReplayBuffer
 
 move_names = {"up": 0, # Changed to 0, 1, 2 to match typical 3-action output (straight, right, left)
               "right": 1,
@@ -15,10 +16,28 @@ move_names = {"up": 0, # Changed to 0, 1, 2 to match typical 3-action output (st
 
 
 class SimpleSnakeAgent(Agent):
-    def __init__(self, train = True,n_step_remember=1, gamma=0.93, end_priority = False):
+    def __init__(self, train = True,n_step_remember=1, gamma=0.93, end_priority = 1, memory = 0):
         model = SimpleSnakeNN()
         optimizer = optim.Adam(model.parameters(),lr=5e-4) 
-        super().__init__(model = model, optimizer = optimizer, criterion= huberLoss(), train = train, n_step_remember=n_step_remember, end_priority=end_priority)  # pozove konstruktor od Agent
+
+        if memory == 0:
+             memory = ReplayBuffer(n_step_remember =n_step_remember)
+        if memory == 1: 
+             memory = TDPriorityReplayBuffer(n_step_remember =n_step_remember)
+        if memory == 2: 
+             memory = TDPriorityReplayBuffer(n_step_remember =n_step_remember, weights = False, predecesor=True)
+        if memory == 3:
+             memory = TDPriorityReplayBuffer(n_step_remember =n_step_remember, weights = False, predecesor=False)
+        if memory == 4:
+             memory = RewardPriorityReplayBuffer(n_step_remember =n_step_remember)
+        if memory == 5:
+             memory = RewardPriorityReplayBuffer(n_step_remember =n_step_remember, reward_priority = 0.5)
+        if memory == 6:
+             memory = RewardPriorityReplayBuffer(n_step_remember =n_step_remember, weights = False, predecesor=True)
+        if memory == 7:
+             memory = RewardPriorityReplayBuffer(n_step_remember =n_step_remember, weights = False, predecesor=False)
+
+        super().__init__(model = model, optimizer = optimizer, criterion= huberLoss(), train = train, n_step_remember=n_step_remember, memory=memory)  # pozove konstruktor od Agent
         print("SimpleSnakeAgent initialized!")
   
     def divide_lr(self,mult=3):
@@ -36,13 +55,14 @@ class SimpleSnakeAgent(Agent):
 
     def give_reward(self, data_novi, data, akcija):
             winner = data_novi.get("winner")
+            done = 0
+            reward = 0.05
             if winner is not None:
                 self.n_games += 1
-                return 1.0 if winner else -1.0
-
-            # living bonus
-            reward = 0.005
-            return reward
+                done = 1
+                reward = 1.0 if winner else -1.0
+            
+            return reward,done
 
 
     def get_state(self, data):
