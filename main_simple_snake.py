@@ -1,7 +1,7 @@
 
 from q_logic_simple_snake import SimpleSnakeAgent , AdvancedSimpleSnakeNN  
 from simplebot import HeatmapBot
-from for_logging import CSVLogger
+from q_logic_logging import CSVLogger
 import os
 import random
 import time
@@ -66,13 +66,15 @@ if not os.path.exists(CHECKPOINT_FOLDER):
 
 # Definiraj relativne putanje za spremanje koristeći os.path.join
 # Ovo će stvoriti putanje poput 'model_checkpoints/save_agent.pth'
-for memory in range(2,8):
+for memory in range(4,8):
     for b in[0.85,0.93]:
         file_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
         log_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
-        log_path_simple = os.path.join(CHECKPOINT_FOLDER, f'save_simple_snake_log_n3_memory{memory}_gamma{b}.csv')
+        file_name = f'save_simple_snake_log_n3_memory{memory}_gamma{b}'
+        log_path_simple = os.path.join(CHECKPOINT_FOLDER, f'{file_name}.csv')
 
-        agent1 = SimpleSnakeAgent(n_step_remember=3, gamma=b, memory= memory)
+        agent1 = SimpleSnakeAgent(n_step_remember=3, gamma=b, memory= memory, 
+                                  advanced_logging_path= file_name, time_logging_path = file_name)
         #agent1.load_agent_state(str = r"C:\Users\lovro\Desktop\AIBG-9.0-master\simple_snake_game_models\pretrained_net.pth")
 
         num_games = 8000
@@ -127,7 +129,8 @@ for memory in range(2,8):
                 if(count%8 == 0 and i >5):
                     sum_count += 1
                     a = time.time()
-                    sum_loss += agent1.train_long_term()
+                    loss = agent1.train_long_term()
+                    sum_loss += loss
                     vrijeme2 += time.time() - a
 
                 data = novi_data
@@ -135,6 +138,7 @@ for memory in range(2,8):
 
             #sum_loss += agent1.train_long_term()
 
+            model_target_update_counter = agent1.trainer.model_target_update_counter
             avg_count = (count)*0.01 + avg_count*0.99
             moving_avg = (sum_reward/count)*0.01 + moving_avg*0.99
             loss_moving_avg = (sum_loss / (sum_count if sum_count else 1)) * 0.01 + loss_moving_avg*0.99

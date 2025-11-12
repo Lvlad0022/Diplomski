@@ -1,7 +1,7 @@
 
 from q_logic import Agent
 from simplebot import HeatmapBot
-from for_logging import CSVLogger
+from Diplomski.q_logic_logging import CSVLogger
 import os
 import random
 import time

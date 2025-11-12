@@ -6,6 +6,7 @@ class SumTree:
         self.capacity = capacity
         self.tree = np.zeros(2 * capacity - 1, dtype=np.float32)
         self.n_entries = 0
+        self.head = 0
 
     @property
     def total(self):
@@ -20,12 +21,16 @@ class SumTree:
 
     def add(self, p, data_idx):
         """Dodaj novi sample s prioritetom p."""
+        if(self.head != data_idx):
+            raise Exception(f"Head mismatch in Sumtree: expected {self.head}, got {data_idx}")
+        
         self.update(data_idx, p)
         self.n_entries = min(self.n_entries + 1, self.capacity)
+        
+        self.head = (self.head + 1)%self.capacity
 
     def update(self, data_idx, p):
         """Ažuriraj prioritet na indeksu i propagiraj promjenu prema gore."""
-        
         idx = self.leaf_index_from_data_idx(data_idx)
         change = p - self.tree[idx]
         self.tree[idx] = p
@@ -55,30 +60,41 @@ class SumTree:
     def sample(self,batch_size, beta = 0): # sampla batch_size random brojeva s vjerojatnostima iz priorites 
         cum_sum = self.tree[0]
         s = np.random.uniform(0, cum_sum, size=batch_size)
-        idxs = []
+        data_idxs = []
         probs = np.zeros((batch_size,))
+        sample_priorities = np.zeros((batch_size,))
         for i in range(batch_size):
             _, prob, data_idx = self.get(s[i]) 
-            idxs.append(data_idx)
+            data_idxs.append(data_idx)
             probs[i] = prob/cum_sum
+            sample_priorities[i] = prob
         weights = (1/(self.n_entries * probs)) ** beta
         if weights.size:
             weights /= weights.max()
-        return idxs , weights
+
+        sample_log = self.sample_logging(self.head-np.array(data_idxs), weights, sample_priorities, batch_size, self.n_entries)
+        return data_idxs , weights, sample_priorities, sample_log
 
     def sample_segment(self,batch_size,beta=0): # sampla batch_size random brojeva s vjerojatnostima iz priorites, ali tako da prvo podijeli na segmente jednakih duljina pa iz svakog segmenta izabere smaple ovo je kao malo uniformnije dist priorities 
         cum_sum = self.tree[0]
         segment = cum_sum/batch_size
         data_idxs = []
         probs = np.zeros((batch_size,))
+        sample_priorities = np.zeros((batch_size,))
         for i in range(batch_size):
             _, prob, data_idx = self.get(np.random.uniform(segment*i, segment*(i+1)))
             data_idxs.append(data_idx)
             probs[i] = prob/cum_sum
+            sample_priorities[i] = prob
         weights = (1/(self.n_entries * probs)) ** beta
         if weights.size:
             weights /= weights.max()
-        return data_idxs, weights
+
+        sample_log = (self.head-np.array(data_idxs), weights, sample_priorities, self.n_entries)
+        return data_idxs, weights, sample_priorities, sample_log 
+    
+    
+
 
 
 class ExperienceMemory:
@@ -174,13 +190,17 @@ class ExperienceMemory:
         self.counter = (self.counter+1) % self.capacity
     
     def update_priorities(self, data_idxs, priority):
+        
         if self.priorities is not None:
             for  data_idx, p in zip(data_idxs, priority):
-                self.priorities.update(data_idx, min(p ** self.alpha(), self.max_priority))
+                p_update= min(p ** self.alpha(), self.max_priority)
+                self.priorities.update(data_idx, p_update)
 
                 pred_idx = self.predecesor[data_idx]
                 if  pred_idx is not False:
-                    self.priorities.update(pred_idx, min(self.max_priority, max( self.priorities.tree[pred_idx], (p * self.gamma**2 )** self.alpha())))
+                    p_pred = min(self.max_priority, max( self.priorities.tree[pred_idx], (p * self.gamma**2 )** self.alpha()))
+
+                    self.priorities.update(pred_idx, p_pred)
 
     def sample(self, batch_size):
         # pretvori prioritete u vjerojatnosti
@@ -190,15 +210,15 @@ class ExperienceMemory:
             weights = np.ones(batch_size, dtype=np.float32)
         else:
             if self.segment :
-                data_idxs, weights = self.priorities.sample_segment(batch_size, self.beta())
+                data_idxs, weights, sample_priorities, sample_log = self.priorities.sample_segment(batch_size, self.beta())
             else:
-                data_idxs, weights = self.priorities.sample(batch_size, self.beta())
+                data_idxs, weights, sample_priorities, sample_log = self.priorities.sample(batch_size, self.beta())
 
 
             samples = [self.memory[i] for i in data_idxs] 
 
 
-        return samples, data_idxs, weights
+        return samples, data_idxs, weights, sample_priorities, sample_log
 
     def __len__(self):
         return len(self.memory)
@@ -217,7 +237,7 @@ class TDPriorityReplayBuffer(ExperienceMemory):
     
         self.eps = eps                  
 
-    def update_priorities(self, indices, td_errors):
+    def update_priorities(self, indices, td_errors, prob):
         priorities = np.abs(td_errors) + self.eps
         super().update_priorities(indices,priorities)
 
@@ -237,13 +257,13 @@ class RewardPriorityReplayBuffer(ExperienceMemory):
         self.eps = eps                  
         self.reward_priority = reward_priority
 
-    def update_priorities(self, indices, _ ):
-        priorities = priorities* self.gamma**2
+    def update_priorities(self, indices, _, prob ):
+        priorities = prob * self.gamma**2  # jedino kaj je ovaj prob dignut na alpha i sada ce se opet dici na alpha ali ajde nek ostane ovako za sada
         super().update_priorities(indices,priorities)
 
     def push(self, experience):
         reward = experience[3]
-        p = 1+ self.reward_priority*reward
+        p = 1+ self.reward_priority*abs(reward)
         super().push(experience, p)
 
 

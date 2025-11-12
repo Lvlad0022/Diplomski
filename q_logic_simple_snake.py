@@ -16,7 +16,7 @@ move_names = {"up": 0, # Changed to 0, 1, 2 to match typical 3-action output (st
 
 
 class SimpleSnakeAgent(Agent):
-    def __init__(self, train = True,n_step_remember=1, gamma=0.93, end_priority = 1, memory = 0):
+    def __init__(self, train = True,n_step_remember=1, gamma=0.93, end_priority = 1, memory = 0, advanced_logging_path= False, time_logging_path = False):
         model = SimpleSnakeNN()
         optimizer = optim.Adam(model.parameters(),lr=5e-4) 
 
@@ -37,7 +37,8 @@ class SimpleSnakeAgent(Agent):
         if memory == 7:
              memory = RewardPriorityReplayBuffer(n_step_remember =n_step_remember, weights = False, predecesor=False)
 
-        super().__init__(model = model, optimizer = optimizer, criterion= huberLoss(), train = train, n_step_remember=n_step_remember, memory=memory)  # pozove konstruktor od Agent
+        super().__init__(model = model, optimizer = optimizer, advanced_logging_path= advanced_logging_path, time_logging_path = time_logging_path,
+                         criterion= huberLoss(), train = train, n_step_remember=n_step_remember, memory=memory)  # pozove konstruktor od Agent
         print("SimpleSnakeAgent initialized!")
   
     def divide_lr(self,mult=3):
@@ -114,3 +115,10 @@ class SimpleSnakeAgent(Agent):
             map_array = np.transpose(map_array, (2, 0, 1))
 
             return  map_array,metadata_array # Also return the raw data for reward calculation
+    
+    def episode_count(self, metadata_states):
+        state_episode_count = np.zeros((len(metadata_states,)))
+        for i,state in enumerate(metadata_states):
+            state_episode_count[i] = state[-1] * 900
+
+        return

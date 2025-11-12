@@ -31,7 +31,7 @@ from collections import deque
 from snake_models import AdvancedSnakeNN, ResnetSnakeNN
 from loss_functions import huberLoss
 from q_logic_memory_classes import TDPriorityReplayBuffer, ReplayBuffer, RewardPriorityReplayBuffer
-
+from q_logic_logging import Advanced_stat_logger, Time_logger
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -63,10 +63,12 @@ class QTrainer:
         self.model_target_cycle = 200 # ovo je jako bitno 
         self.model_target_cycle_mult = 1.2
         self.model_target_max = 3000
+        self.model_target_update_counter = 0
 
     def train_step(self, map_state, metadata_state, action, reward, next_map_state, next_metadata_state, done, gamma_train,weights):
         self.model_target_update()
         # Ensure inputs are tensors and have the correct data types
+        a = time.time()
         map_state = map_state.float().to(DEVICE)
         metadata_state = metadata_state.float().to(DEVICE)
         action = action.long().to(DEVICE)
@@ -76,7 +78,7 @@ class QTrainer:
         done = done.bool().to(DEVICE) 
         gamma_train = gamma_train.float().to(DEVICE)
         weights = weights.float().to(DEVICE)
-
+        vrijeme_move_to_gpu = time.time()-a
 
 
         # If only a single experience is provided, add a batch dimension
@@ -95,6 +97,8 @@ class QTrainer:
         # 1: Predicted Q values with current state
         # Set model to training mode before the forward pass for training
         
+
+        a = time.time()
         self.model.train()
         pred = self.model(map_state, metadata_state) # Shape: (batch_size, num_actions)
 
@@ -108,6 +112,8 @@ class QTrainer:
             self.model.train()
 
             max_next_q = torch.max(next_state_q_values, dim=1)[0] # Get max Q for each item in batch
+        vrijeme_forward_prop = time.time()-a
+
 
         # Update the target Q-value for the action that was actually taken
         # target[idx][action_index] = reward[idx] + self.gamma * max_next_q[idx] * (1 - done[idx])
@@ -124,16 +130,23 @@ class QTrainer:
 
         loss = self.criterion(target_a, pred_a, weights)
         
-        td_errors = np.abs((target_a - pred_a).detach().cpu().numpy().squeeze())
         
+        target_a = target_a.detach().cpu().numpy().squeeze()
+        pred_a = pred_a.detach().cpu().numpy().squeeze()
+        td_errors = np.abs(target_a - pred_a)
         
 
-
+        a = time.time()
         loss.backward()
         self.optimizer.step()
         if self.scheduler:
             self.scheduler.step()
-        return float(loss), td_errors
+        vrijeme_back_prop = time.time()-a
+
+        loss = loss.cpu()
+
+        vremena = (vrijeme_move_to_gpu, vrijeme_forward_prop, vrijeme_back_prop)
+        return float(loss), td_errors, np.abs(pred_a), vremena
 
 
     def model_target_update(self):
@@ -142,6 +155,8 @@ class QTrainer:
             self.model_target_cycle = min( self.model_target_cycle_mult* self.model_target_cycle, self.model_target_max)
             self.model_target_counter = 0
             self.model_target.load_state_dict(self.model.state_dict())
+            self.model_target_update_counter += 1
+
 
 # --- Constants ---
 MAX_MEMORY = 100_000
@@ -151,44 +166,37 @@ LR = 0.0005
 # --- Agent Class ---
 class Agent:
 
-    def __init__(self, model, optimizer ,criterion = huberLoss() ,train = True,n_step_remember=1, gamma=0.93,memory = ReplayBuffer()):
-        """
-        Initializes the Agent.
-
-        Args:
-            map_channels (int): Number of channels in the input map image.
-            map_height (int): Height of the input map image.
-            map_width (int): Width of the input map image.
-            metadata_dim (int): Dimension of the metadata input.
-            num_actions (int): Number of possible actions.
-        """
+    def __init__(self, model, optimizer ,criterion = huberLoss() ,train = True, advanced_logging_path= False, time_logging_path = False,
+                 n_step_remember=1, gamma=0.93,memory = ReplayBuffer(), batch_size = BATCH_SIZE):
+        
         self.n_games = 0
-        self.epsilon = 0.9           # Početna vrijednost
-        self.epsilon_min = 0.05      # Minimalna vrijednost
+        self.epsilon = 0.9           
+        self.epsilon_min = 0.05      
         self.epsilon_decay = 0.9995 
+        self.gamma = gamma
+        self.action_counter= 0
+        self.train = train
+        self.batch_size = batch_size
+
+        #memory
         self.memory = memory 
-        
-        self.episode_count = 0
-
-        # --- Use the AdvancedSnakeNN model --
-        self.model = model.to(DEVICE)
-        self.model_target =  copy.deepcopy(model).to(DEVICE)
-        self.model_target.load_state_dict(self.model.state_dict())
-        self.model_target.eval() 
-        # Obavezno sinkronizirajte težine na početku!
-
-        self.trainer = QTrainer(self.model,self.model_target, criterion= criterion, optimizer=optimizer, lr = LR,gamma=gamma)
-
-        
-        self.counter= 0 
-        
+        self.rewards_average = 0
         self.n_step_remember = n_step_remember
         self.last_action = None
         self.rewards = deque(maxlen=n_step_remember)
         self.remember_data = deque(maxlen=n_step_remember)
-        self.gamma = gamma
-        self.rewards_average = 0
-        self.train = train
+
+        #modeli
+        self.model = model.to(DEVICE)
+        self.model_target =  copy.deepcopy(model).to(DEVICE)
+        self.model_target.load_state_dict(self.model.state_dict())
+        self.model_target.eval() 
+
+        self.trainer = QTrainer(self.model,self.model_target, criterion= criterion, optimizer=optimizer, lr = LR,gamma=gamma)
+         
+        #logging
+        self.advanced_logger = Advanced_stat_logger(advanced_logging_path, 1000, self.batch_size) if advanced_logging_path else None
+        self.time_logger =  Time_logger(time_logging_path) if time_logging_path else None
 
 
     def return_counter(self):
@@ -197,95 +205,17 @@ class Agent:
     def save_agent_state(self, file_path='agent_state.pth'):
         """Sprema stanje agenta i memoriju u odvojene datoteke."""
         
-        # Putanja za glavnu datoteku sa stanjem
-        
-        # Putanja za odvojenu datoteku s memorijom
-        memory_file_path = file_path.replace('.pth', '_memory.pth')
-
-        # 1. Stvori rječnik sa SVIM komponentama OSIM memorije
-        agent_state = {
-            'n_games': self.n_games,
-            'epsilon': self.epsilon,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.trainer.optimizer.state_dict(),
-        }
-
-        # 2. Spremi stanje agenta (bez memorije)
-        torch.save(agent_state, file_path)
-        print(f"Stanje agenta spremljeno u: {file_path}")
-
-        # 3. Spremi memoriju u ZASEBNU datoteku
-        num_experiences_to_save = 20000 
-    
-        # Uzmi samo zadnjih N iskustava iz deque-a
-        # Prvo pretvorimo u listu da možemo koristiti slicing
-        recent_memory = list(self.memory)[-num_experiences_to_save:]
-        
-        torch.save(recent_memory, memory_file_path)
-        print(f"Spremljeno zadnjih {len(recent_memory)} iskustava u: {memory_file_path}")
-        # Unutar vaše Agent klase
-    
-    def get_model_state(self):
-        lr = LR
-        if self.trainer.optimizer:
-            lr = self.trainer.optimizer.param_groups[0]["lr"]
-        return self.n_games, self.epsilon, lr
 
     def load_agent_state(self, file_name='agent_state.pth', training=True):
         """Učitava stanje agenta i memoriju iz odvojenih datoteka."""
-        model_folder_path = './model'
-        state_file_path = os.path.join(model_folder_path, file_name)
-        memory_file_path = state_file_path.replace('.pth', '_memory.pth')
-
-        # Provjeri postoje li obje datoteke
-        if not os.path.exists(state_file_path) or not os.path.exists(memory_file_path):
-            print(f"Upozorenje: Jedna od datoteka za učitavanje nije pronađena. Agent počinje od nule.")
-            return False
-
-        try:
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            
-            # 1. Učitaj stanje agenta (bez memorije)
-            checkpoint = torch.load(state_file_path, map_location=device)
-            print(f"Učitavanje stanja agenta s putanje: {state_file_path}")
-
-            self.model.load_state_dict(checkpoint['model_state_dict'])
-            
-            if training:
-                #if 'optimizer_state_dict' in checkpoint:
-                #    self.trainer.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                
-                # 2. Učitaj memoriju iz ZASEBNE datoteke
-                print(f"Učitavanje memorije s putanje: {memory_file_path}")
-                memory_list = torch.load(memory_file_path, map_location=device)
-                self.memory = deque(memory_list, maxlen=self.memory.maxlen)
-
-
-                self.n_games = checkpoint.get('n_games', self.n_games)
-                self.epsilon = checkpoint.get('epsilon', self.epsilon)
-                self.model.train()
-                print(f"Agent učitan u 'training' modu.")
-            else:
-                self.model.eval()
-                self.epsilon = 0
-                print("Agent učitan u 'inference' modu.")
-
-            self.model_target.load_state_dict(self.model.state_dict())
-            self.model_target.eval()
-            
-            print(f"Stanje uspješno učitano. Nastavlja se od {self.n_games}. igre.")
-            print(f"Veličina učitane memorije je: {len(self.memory)}")
-            return True
-
-        except Exception as e:
-            print(f"Greška prilikom učitavanja stanja agenta: {e}")
-            traceback.print_exc()
-            return False
+        
 
     def change_weights(self, other):
         self.model.load_state_dict(other.model.state_dict())
 
-    
+    def get_model_state(self):
+        return self.n_games, self.epsilon, self.trainer.optimizer.param_groups[0]["lr"]
+
 
     def remember(self, data, data_novi):
         map_state, metadata_state = self.get_state(data) 
@@ -324,13 +254,13 @@ class Agent:
 
         
         if not len(self.memory) <1000 :
-            mini_sample, idxs, weights = self.memory.sample(BATCH_SIZE)
-
+            a = time.time()
+            mini_sample, idxs, weights, sample_priorities, log_sample = self.memory.sample(self.batch_size)
+            vrijeme_sample = time.time()-a
             
 
             # Unpack the samples into separate lists
             map_states, metadata_states, actions, rewards, next_map_states, next_metadata_states, dones,gamma_train = zip(*mini_sample)
-            
             # Convert lists of numpy arrays to tensors
             map_states = torch.tensor(np.array(map_states), dtype=torch.float)
             metadata_states = torch.tensor(np.array(metadata_states), dtype=torch.float)
@@ -344,19 +274,40 @@ class Agent:
 
             # --- Call the trainer with separate inputs ---
             # You need to modify your QTrainer.train_step to accept these
-            loss, td =self.trainer.train_step(map_states, metadata_states, actions, rewards, next_map_states, next_metadata_states, dones,gamma_train, weights)
+            loss, td, Q_val, vremena_train =self.trainer.train_step(map_states, metadata_states, actions, rewards, next_map_states, next_metadata_states, dones,gamma_train, weights)
             #print("Training long memory batch...") # Placeholder
 
-            
-            self.memory.update_priorities(idxs, td)
+            a = time.time()
+            self.memory.update_priorities(idxs, td, sample_priorities)
+            vrijeme_update_priorities = time.time()-a
 
+
+            #provjeri koliko vremena treba
+            a = time.time()
+            total_norm = 0.0
+            for p in self.model.parameters():
+                if p.grad is not None:
+                    param_norm = p.grad.data.norm(2)   # L2 norma gradijenta parametra
+                    total_norm += param_norm.item() ** 2
+            total_norm = total_norm ** 0.5  #
+            log_train = (td, Q_val, self.episode_count(metadata_states), total_norm)
+            vrijeme_logging = time.time()-a
+
+            vremena_long_term = (vrijeme_sample,vrijeme_update_priorities,vrijeme_logging)
+        
+            if self.time_logger is not None:
+                self.time_logger(vremena_long_term, vremena_train)
+            if self.advanced_logger is not None:
+                self.advanced_logger(log_train, log_sample)
 
             return loss
         return 0
 
-
+    def episode_count(self, metadata_states):
+        return np.zeros((len(metadata_states),))
+    
     def get_action(self, data):
-        self.counter += 1
+        self.action_counter += 1
         """
         Chooses an action based on the current state using an epsilon-greedy strategy.
 
@@ -375,7 +326,7 @@ class Agent:
         final_move = [0,0,0,0] # Assuming 4 possible actions (straight, right, left)
 
         
-        if(self.counter%10==0 and self.epsilon):
+        if(self.action_counter%10==0 and self.epsilon):
             self.epsilon = max(self.epsilon_min , self.epsilon * self.epsilon_decay)
         if random.uniform(0, 1) < self.epsilon: # Increased random range for slower decay
             # Exploration: Choose a random action
