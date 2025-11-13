@@ -40,7 +40,7 @@ class QTrainer:
     Trains the Q-network using experiences.
     Implements the training step for a DQN-like agent.
     """
-    def __init__(self, model,model_target, criterion = nn.MSELoss(), optimizer = None, scheduler = False, lr=0.0005, gamma=0.93):
+    def __init__(self, model,model_target,double_q=True, criterion = nn.MSELoss(), optimizer = None, scheduler = False, lr=0.0005, gamma=0.93):
         """
         Initializes the QTrainer.
 
@@ -64,6 +64,8 @@ class QTrainer:
         self.model_target_cycle_mult = 1.2
         self.model_target_max = 3000
         self.model_target_update_counter = 0
+
+        self.double_q = double_q
 
     def train_step(self, map_state, metadata_state, action, reward, next_map_state, next_metadata_state, done, gamma_train,weights):
         self.model_target_update()
@@ -94,46 +96,29 @@ class QTrainer:
         # Else: Assume it's already a batch: (B, C, H, W), (B, metadata_dim), etc.
 
 
-        # 1: Predicted Q values with current state
-        # Set model to training mode before the forward pass for training
-        
+         #  ----  bootstraping ------
 
-        a = time.time()
+        a = time.time() 
         self.model.train()
-        pred = self.model(map_state, metadata_state) # Shape: (batch_size, num_actions)
-
-        # 2: Calculate the target Q values based on the Bellman equation
-        target = pred.detach().clone()
-        with torch.no_grad(): # Calculate targets without tracking gradients
-            # Set model to evaluation mode for calculating target Qs from next state
-            self.model_target.eval()
-            next_state_q_values = self.model_target(next_map_state, next_metadata_state) # Shape: (batch_size, num_actions)
-            # Set model back to training mode
-            self.model.train()
-
-            max_next_q = torch.max(next_state_q_values, dim=1)[0] # Get max Q for each item in batch
+        pred = self.model(map_state, metadata_state) 
+        
+        max_next_q = self._compute_bootstrap_q(next_map_state, next_metadata_state)
         vrijeme_forward_prop = time.time()-a
 
 
-        # Update the target Q-value for the action that was actually taken
-        # target[idx][action_index] = reward[idx] + self.gamma * max_next_q[idx] * (1 - done[idx])
-        # Using advanced indexing for efficiency instead of loop
-        target[range(len(done)), torch.argmax(action, dim=1)] = reward + gamma_train * max_next_q * (~done) # Use ~done for not done
+        target = pred.detach().clone()
+        action_indices = torch.argmax(action, dim=1) 
+        target[range(len(done)), action_indices] = reward + gamma_train * max_next_q * (~done) # Use ~done for not done
 
         # 3: Compute the loss
-        self.optimizer.zero_grad()
+        self.optimizer.zero_grad(set_to_none=True)
 
-        action_indices = torch.argmax(action, dim=1)  # (B,)
         pred_a = pred.gather(1, action_indices.unsqueeze(1)).squeeze(1)
         target_a = target.gather(1, action_indices.unsqueeze(1)).squeeze(1)
 
 
-        loss = self.criterion(target_a, pred_a, weights)
+        loss = self.criterion(target_a, pred_a, weights)   
         
-        
-        target_a = target_a.detach().cpu().numpy().squeeze()
-        pred_a = pred_a.detach().cpu().numpy().squeeze()
-        td_errors = np.abs(target_a - pred_a)
         
 
         a = time.time()
@@ -144,6 +129,12 @@ class QTrainer:
         vrijeme_back_prop = time.time()-a
 
         loss = loss.cpu()
+
+        target_a = target_a.detach().cpu().numpy().squeeze()
+        pred_a = pred_a.detach().cpu().numpy().squeeze()
+        td_errors = np.abs(target_a - pred_a)
+
+
 
         vremena = (vrijeme_move_to_gpu, vrijeme_forward_prop, vrijeme_back_prop)
         return float(loss), td_errors, np.abs(pred_a), vremena
@@ -157,6 +148,28 @@ class QTrainer:
             self.model_target.load_state_dict(self.model.state_dict())
             self.model_target_update_counter += 1
 
+    def _compute_bootstrap_q(self, next_map_state, next_metadata_state):
+        """
+        Returns max_next_q for each sample, either DQN-style or Double DQN-style.
+        """
+        # Q_target(s', :)
+        self.model_target.eval()
+        with torch.no_grad():
+            q_next_target = self.model_target(next_map_state, next_metadata_state)
+
+        if self.double_q:
+            # 🔹 Double DQN: argmax from online net, value from target net
+            q_next_online = self.model(next_map_state, next_metadata_state)
+
+            next_actions = q_next_online.argmax(dim=1)          # [B]
+            max_next_q = q_next_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)
+        else:
+            # 🔹 Standard DQN
+            max_next_q, _ = q_next_target.max(dim=1)
+
+        return max_next_q
+
+
 
 # --- Constants ---
 MAX_MEMORY = 100_000
@@ -166,7 +179,7 @@ LR = 0.0005
 # --- Agent Class ---
 class Agent:
 
-    def __init__(self, model, optimizer ,criterion = huberLoss() ,train = True, advanced_logging_path= False, time_logging_path = False,
+    def __init__(self, model, optimizer ,criterion = huberLoss() ,train = True, advanced_logging_path= False, time_logging_path = False, double_q=True ,
                  n_step_remember=1, gamma=0.93,memory = ReplayBuffer(), batch_size = BATCH_SIZE):
         
         self.n_games = 0
@@ -192,7 +205,7 @@ class Agent:
         self.model_target.load_state_dict(self.model.state_dict())
         self.model_target.eval() 
 
-        self.trainer = QTrainer(self.model,self.model_target, criterion= criterion, optimizer=optimizer, lr = LR,gamma=gamma)
+        self.trainer = QTrainer(self.model, self.model_target, double_q=double_q, criterion= criterion, optimizer=optimizer, lr = LR,gamma=gamma)
          
         #logging
         self.advanced_logger = Advanced_stat_logger(advanced_logging_path, 1000, self.batch_size) if advanced_logging_path else None
@@ -222,7 +235,7 @@ class Agent:
         self.remember_data.append((map_state, metadata_state,self.last_action))
 
         reward,done = self.give_reward(data_novi = data_novi,data = data, akcija = self.last_action)
-        self.rewards_average +=  self.gamma ** len(self.rewards) * reward 
+        self.rewards_average +=  self.gamma ** len(self.rewards) * reward #len(self.rewards) = len(remember_data)-1
         self.rewards.append(reward)
 
         next_map_state, next_metadata_state = self.get_state(data_novi)
@@ -231,7 +244,7 @@ class Agent:
             gamma_train = self.gamma ** (len(self.rewards))
             while not len(self.remember_data) == 0:
                 map_state, metadata_state,action = self.remember_data.popleft()
-                experience = (map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, self.gamma**self.n_step_remember)
+                experience = (map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, gamma_train)
                 self.memory.push(experience)
                 gamma_train = gamma_train / self.gamma
                 reward = self.rewards.popleft()
@@ -290,15 +303,16 @@ class Agent:
                     param_norm = p.grad.data.norm(2)   # L2 norma gradijenta parametra
                     total_norm += param_norm.item() ** 2
             total_norm = total_norm ** 0.5  #
-            log_train = (td, Q_val, self.episode_count(metadata_states), total_norm)
+            
+            log_train = (td, Q_val, self.episode_count(metadata_states), total_norm, loss)
             vrijeme_logging = time.time()-a
 
             vremena_long_term = (vrijeme_sample,vrijeme_update_priorities,vrijeme_logging)
         
             if self.time_logger is not None:
-                self.time_logger(vremena_long_term, vremena_train)
+                self.time_logger(vremena_long_term, vremena_train,self.n_games)
             if self.advanced_logger is not None:
-                self.advanced_logger(log_train, log_sample)
+                self.advanced_logger(log_train, log_sample,self.n_games)
 
             return loss
         return 0

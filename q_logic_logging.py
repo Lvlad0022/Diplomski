@@ -49,7 +49,7 @@ class Advanced_stat_logger:
         self.count = 0
         self.update_every = update_every
         self.batch_size = batch_size
-        self.step = 1
+        
 
         # --- inicijalizacija buffer polja ---
         self.td_vector = np.zeros((update_every * batch_size,))
@@ -61,31 +61,16 @@ class Advanced_stat_logger:
         self.priorities_vector = np.zeros((update_every * batch_size,))
         self.replay_size_vector = np.zeros((update_every,))
         self.norm_vector = np.zeros((update_every,))
+        self.loss = np.zeros((update_every,))
 
         # --- TensorBoard writer ---
         self.writer = SummaryWriter(log_dir=f"{log_dir}/{self.filename}")
 
-        # --- CSV header ---
-        self.fieldnames = [
-            "td_error25", "td_error50", "td_error90", "td_error99",
-            "Q_val25", "Q_val50", "Q_val90", "Q_val99",
-            "replay_size",
-            "experience_age25", "experience_age50", "experience_age75", "experience_age90",
-            "weights50", "weights75", "weights90", "weights99",
-            "priorities50", "priorities75", "priorities90", "priorities99",
-            "grad_norm25", "grad_norm50", "grad_norm90", "grad_norm99"
-        ]
 
-        if not os.path.exists(self.filename_csv):
-            with open(self.filename_csv, mode='w', newline='') as f:
-                writer = csv.DictWriter(f, fieldnames=self.fieldnames)
-                writer.writeheader()
 
-    # -----------------------------
-    # glavna metoda za dodavanje batch loga
-    # -----------------------------
-    def __call__(self, train_log, sample_log):
-        td_error, Q_val, episode_count, total_norm = train_log
+    
+    def __call__(self, train_log, sample_log, step):
+        td_error, Q_val, episode_count, total_norm, loss = train_log
         experience_age, weights, sample_priorities, replay_size = sample_log
 
         start, end = self.count * self.batch_size, (self.count + 1) * self.batch_size
@@ -99,16 +84,19 @@ class Advanced_stat_logger:
 
         self.replay_size_vector[self.count] = replay_size
         self.norm_vector[self.count] = total_norm
+        self.loss[self.count] = loss
 
         self.count += 1
         if self.count == self.update_every:
             self.count = 0
-            self.save_log()
+            self.save_log(step)
 
 
-    def save_log(self):
+    def save_log(self, step):
         def percentiles(x):
             return {
+                "1": np.percentile(x, 1),
+                "10": np.percentile(x, 10),
                 "25": np.percentile(x, 25),
                 "50": np.percentile(x, 50),
                 "75": np.percentile(x, 75),
@@ -123,39 +111,18 @@ class Advanced_stat_logger:
         w_p = percentiles(self.weights_vector)
         pr_p = percentiles(self.priorities_vector)
         norm_p = percentiles(self.norm_vector)
-
-        replay_size = np.mean(self.replay_size_vector)
-
-        # --- priprema zapisa za CSV ---
-        data_row = {
-            "td_error25": td_p["25"], "td_error50": td_p["50"], "td_error90": td_p["90"], "td_error99": td_p["99"],
-            "Q_val25": q_p["25"], "Q_val50": q_p["50"], "Q_val90": q_p["90"], "Q_val99": q_p["99"],
-            "replay_size": replay_size,
-            "experience_age25": age_p["25"], "experience_age50": age_p["50"],
-            "experience_age75": age_p["75"], "experience_age90": age_p["90"],
-            "weights50": w_p["50"], "weights75": w_p["75"], "weights90": w_p["90"], "weights99": w_p["99"],
-            "priorities50": pr_p["50"], "priorities75": pr_p["75"],
-            "priorities90": pr_p["90"], "priorities99": pr_p["99"],
-            "grad_norm25": norm_p["25"], "grad_norm50": norm_p["50"],
-            "grad_norm90": norm_p["90"], "grad_norm99": norm_p["99"],
-        }
-
-        # --- spremi u CSV ---
-        with open(self.filename_csv, mode='a', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=self.fieldnames)
-            writer.writerow(data_row)
+        loss_mean ={"mean": np.mean(self.loss)}
 
         
-        step =  self.step # za sad neka je ovako kasnije eventualno nesto informaticvnije
-
-        self.writer.add_scalar("train/replay_size", replay_size, step)
-        self.writer.add_scalars("train/td_error", {"p25": td_p["25"], "p50": td_p["50"], "p90": td_p["90"], "p99": td_p["99"]}, step)
-        self.writer.add_scalars("train/q_value", {"p25": q_p["25"], "p50": q_p["50"], "p90": q_p["90"], "p99": q_p["99"]}, step)
-        self.writer.add_scalars("train/experience_age", {"p25": age_p["25"], "p50": age_p["50"], "p75": age_p["75"], "p90": age_p["90"]}, step)
-        self.writer.add_scalars("train/weights", {"p50": w_p["50"], "p75": w_p["75"], "p90": w_p["90"], "p99": w_p["99"]}, step)
-        self.writer.add_scalars("train/priorities", {"p50": pr_p["50"], "p75": pr_p["75"], "p90": pr_p["90"], "p99": pr_p["99"]}, step)
-        self.writer.add_scalars("train/grad_norm", {"p25": norm_p["25"], "p50": norm_p["50"], "p90": norm_p["90"], "p99": norm_p["99"]}, step)
-
+        
+        self.writer.add_scalars("train/td_error", td_p, step)
+        self.writer.add_scalars("train/q_value", q_p, step)
+        self.writer.add_scalars("train/experience_age", age_p, step)
+        self.writer.add_scalars("train/weights", w_p, step)
+        self.writer.add_scalars("train/priorities", pr_p, step)
+        self.writer.add_scalars("train/grad_norm", norm_p, step)
+        self.writer.add_scalars("train/loss", loss_mean, step)
+        
         # --- reset vektora ---
         self.td_vector.fill(0)
         self.Q_val_vector.fill(0)
@@ -165,7 +132,8 @@ class Advanced_stat_logger:
         self.priorities_vector.fill(0)
         self.replay_size_vector.fill(0)
         self.norm_vector.fill(0)
-        self.step += 1
+        self.loss.fill(0)
+        
 
     # -----------------------------
     def close(self):
@@ -179,7 +147,6 @@ class Time_logger:
         self.filename_csv = f"{self.filename}.csv"
         self.update_every = update_every
         self.count = 0
-        self.step  = 1
 
         # --- Buffers ---
         self.sample_times = np.zeros((update_every,))
@@ -194,13 +161,30 @@ class Time_logger:
 
         # --- CSV header ---
         self.fieldnames = [
-            "sample_mean", "sample_p50", "sample_p90", "sample_p99",
-            "update_priorities_mean", "update_priorities_p50", "update_priorities_p90", "update_priorities_p99",
-            "logging_mean", "logging_p50", "logging_p90", "logging_p99",
-            "move_to_gpu_mean", "move_to_gpu_p50", "move_to_gpu_p90", "move_to_gpu_p99",
-            "forward_mean", "forward_p50", "forward_p90", "forward_p99",
-            "backprop_mean", "backprop_p50", "backprop_p90", "backprop_p99"
+            # sample times
+            "sample_mean", "sample_p25", "sample_p50", "sample_p75", "sample_p90", "sample_p99",
+
+            # update priorities times
+            "update_priorities_mean", "update_priorities_p25", "update_priorities_p50",
+            "update_priorities_p75", "update_priorities_p90", "update_priorities_p99",
+
+            # logging times
+            "logging_mean", "logging_p25", "logging_p50", "logging_p75",
+            "logging_p90", "logging_p99",
+
+            # move to gpu times
+            "move_to_gpu_mean", "move_to_gpu_p25", "move_to_gpu_p50",
+            "move_to_gpu_p75", "move_to_gpu_p90", "move_to_gpu_p99",
+
+            # forward times
+            "forward_mean", "forward_p25", "forward_p50", "forward_p75",
+            "forward_p90", "forward_p99",
+
+            # backprop times
+            "backprop_mean", "backprop_p25", "backprop_p50", "backprop_p75",
+            "backprop_p90", "backprop_p99",
         ]
+
 
         if not os.path.exists(self.filename_csv):
             with open(self.filename_csv, mode="w", newline="") as f:
@@ -208,7 +192,7 @@ class Time_logger:
                 writer.writeheader()
 
     # ---------------------------------------------------------
-    def __call__(self, vremena_long_term, vremena_train):
+    def __call__(self, vremena_long_term, vremena_train,step):
         """
         Dodaje nove mjerene vrijednosti u buffer.
         Kad se napuni `update_every`, izračunava statistike i logira ih.
@@ -227,54 +211,40 @@ class Time_logger:
         self.count += 1
 
         if self.count == self.update_every:
-            self.save_log()
+            self.save_log(step)
             self.reset_buffers()
 
     # ---------------------------------------------------------
-    def _percentiles(self, arr):
-        return {
-            "mean": np.mean(arr),
-            "p50": np.percentile(arr, 50),
-            "p90": np.percentile(arr, 90),
-            "p99": np.percentile(arr, 99)
-        }
+    
 
     # ---------------------------------------------------------
-    def save_log(self):
+    def save_log(self,step):
+        def percentiles(x):
+            return {
+                "mean": np.mean(x),
+                "p25": np.percentile(x, 25),
+                "p50": np.percentile(x, 50),
+                "p75": np.percentile(x, 75),
+                "p90": np.percentile(x, 90),
+                "p99": np.percentile(x, 99),
+            }
+        
         # Izračunaj statistike za svaku kategoriju
-        s = self._percentiles(self.sample_times)
-        u = self._percentiles(self.update_priorities_times)
-        l = self._percentiles(self.logging_times)
-        g = self._percentiles(self.move_to_gpu_times)
-        f = self._percentiles(self.forward_times)
-        b = self._percentiles(self.backprop_times)
+        sample_p = percentiles(self.sample_times)
+        update_p = percentiles(self.update_priorities_times)
+        logging_p = percentiles(self.logging_times)
+        gpu_p = percentiles(self.move_to_gpu_times)
+        forward_p = percentiles(self.forward_times)
+        backprop_p = percentiles(self.backprop_times)
 
-        # Priprema reda za CSV
-        row = {
-            "sample_mean": s["mean"], "sample_p50": s["p50"], "sample_p90": s["p90"], "sample_p99": s["p99"],
-            "update_priorities_mean": u["mean"], "update_priorities_p50": u["p50"], "update_priorities_p90": u["p90"], "update_priorities_p99": u["p99"],
-            "logging_mean": l["mean"], "logging_p50": l["p50"], "logging_p90": l["p90"], "logging_p99": l["p99"],
-            "move_to_gpu_mean": g["mean"], "move_to_gpu_p50": g["p50"], "move_to_gpu_p90": g["p90"], "move_to_gpu_p99": g["p99"],
-            "forward_mean": f["mean"], "forward_p50": f["p50"], "forward_p90": f["p90"], "forward_p99": f["p99"],
-            "backprop_mean": b["mean"], "backprop_p50": b["p50"], "backprop_p90": b["p90"], "backprop_p99": b["p99"],
-        }
 
-        # Zapis u CSV
-        with open(self.filename_csv, mode="a", newline="") as f1:
-            writer = csv.DictWriter(f1, fieldnames=self.fieldnames)
-            writer.writerow(row)
+        self.writer.add_scalars("time/sample", sample_p, step)
+        self.writer.add_scalars("time/update_priorities", update_p, step)
+        self.writer.add_scalars("time/logging", logging_p, step)
+        self.writer.add_scalars("time/move_to_gpu", gpu_p, step)
+        self.writer.add_scalars("time/forward", forward_p, step)
+        self.writer.add_scalars("time/backprop", backprop_p, step)
 
-        # TensorBoard log
-        step = self.step
-
-        self.writer.add_scalars("time/sample", s, step)
-        self.writer.add_scalars("time/update_priorities", u, step)
-        self.writer.add_scalars("time/logging", l, step)
-        self.writer.add_scalars("time/move_to_gpu", g, step)
-        self.writer.add_scalars("time/forward", f, step)
-        self.writer.add_scalars("time/backprop", b, step)
-
-        self.step += 1
 
 
     # ---------------------------------------------------------

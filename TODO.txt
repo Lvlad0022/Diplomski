@@ -1,5 +1,5 @@
 reduce lr on plateu 
-lr schduler napraviti
+lr scheduler napraviti
 možda i druge optimizator RMSProp, Adam i AdamW
 
 probati onaj polyak target update

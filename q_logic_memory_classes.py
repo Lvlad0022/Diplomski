@@ -72,7 +72,7 @@ class SumTree:
         if weights.size:
             weights /= weights.max()
 
-        sample_log = self.sample_logging(self.head-np.array(data_idxs), weights, sample_priorities, batch_size, self.n_entries)
+        sample_log = self.sample_logging((self.head-np.array(data_idxs))%self.capacity, weights, sample_priorities, batch_size, self.n_entries)
         return data_idxs , weights, sample_priorities, sample_log
 
     def sample_segment(self,batch_size,beta=0): # sampla batch_size random brojeva s vjerojatnostima iz priorites, ali tako da prvo podijeli na segmente jednakih duljina pa iz svakog segmenta izabere smaple ovo je kao malo uniformnije dist priorities 
@@ -90,7 +90,7 @@ class SumTree:
         if weights.size:
             weights /= weights.max()
 
-        sample_log = (self.head-np.array(data_idxs), weights, sample_priorities, self.n_entries)
+        sample_log = (self.head-np.array(data_idxs)%self.capacity, weights, sample_priorities, self.n_entries)
         return data_idxs, weights, sample_priorities, sample_log 
     
     
@@ -208,6 +208,9 @@ class ExperienceMemory:
             data_idxs = np.random.choice(len(self.memory ), batch_size)
             samples = [self.memory[i] for i in data_idxs]
             weights = np.ones(batch_size, dtype=np.float32)
+            sample_priorities = np.ones(batch_size, dtype=np.float32)
+
+            sample_log = ((self.counter-np.array(data_idxs))%self.capacity, weights, sample_priorities, len(self.memory))
         else:
             if self.segment :
                 data_idxs, weights, sample_priorities, sample_log = self.priorities.sample_segment(batch_size, self.beta())
@@ -231,13 +234,13 @@ class TDPriorityReplayBuffer(ExperienceMemory):
     memory koji određuje prioritete s obzirom na TD_error koji je bio tijekom učenja iz sjećanja
     """
     def __init__(self, capacity=100_000, gamma=0.93, n_step_remember=1, weights = True, segment= True, predecesor = False,
-                  alpha_start=0.6, alpha_end=0.6, alpha_steps=1_000_000, beta_start=0.4, beta_end=1.0, beta_steps=200_000, eps=1e-6):
+                  alpha_start=0.6, alpha_end=0.6, alpha_steps=1_000_000, beta_start=0.4, beta_end=0.7, beta_steps=200_000, eps=1e-6):
         super().__init__(capacity = capacity,gamma = gamma, n_step_remember = n_step_remember, priorities= True, weights_bool = weights, segment=segment, predecesor_bool= predecesor, 
                         alpha_start=alpha_start, alpha_end=alpha_end, alpha_steps=alpha_steps, beta_end= beta_end, beta_start= beta_start, beta_steps= beta_steps )
     
         self.eps = eps                  
 
-    def update_priorities(self, indices, td_errors, prob):
+    def update_priorities(self, indices, td_errors, _):
         priorities = np.abs(td_errors) + self.eps
         super().update_priorities(indices,priorities)
 
@@ -250,7 +253,7 @@ class RewardPriorityReplayBuffer(ExperienceMemory):
     daje veći prioritet sjecanjima s vecim rewardom jer racuna da su ona bitnija
     """
     def __init__(self, capacity=100_000, reward_priority= 1, gamma=0.93, n_step_remember=1, weights = True, segment= True, predecesor = False,
-                 alpha=0.6,alpha_end=0.1, alpha_steps = 1_000_000, beta_start=0.4, beta_end=1.0, beta_steps=200_000, eps=1e-6):
+                 alpha=0.6,alpha_end=0, alpha_steps = 200_000, beta_start=0.4, beta_end=1.0, beta_steps=200_000, eps=1e-6):
         super().__init__(capacity = capacity, gamma = gamma,n_step_remember= n_step_remember, priorities=True, weights_bool = weights, segment=segment, predecesor_bool= predecesor,
                          alpha_start= alpha, alpha_end = alpha_end, alpha_steps = alpha_steps, beta_end= beta_end, beta_start= beta_start, beta_steps= beta_steps )
     
@@ -274,5 +277,5 @@ class ReplayBuffer(ExperienceMemory):
     def __init__(self, capacity=100_000, gamma=0.93, n_step_remember=1):
         super().__init__(capacity = capacity, n_step_remember = n_step_remember, priorities=False, weights_bool = False, segment=False, predecesor_bool= False)
     
-    
-                     
+    def update_priorities(self, indices, priorities, _):
+        super().update_priorities(indices,priorities)

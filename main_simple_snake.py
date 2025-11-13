@@ -1,5 +1,5 @@
 
-from q_logic_simple_snake import SimpleSnakeAgent , AdvancedSimpleSnakeNN  
+from q_logic_simple_snake import SimpleSnakeAgent   
 from simplebot import HeatmapBot
 from q_logic_logging import CSVLogger
 import os
@@ -66,14 +66,14 @@ if not os.path.exists(CHECKPOINT_FOLDER):
 
 # Definiraj relativne putanje za spremanje koristeći os.path.join
 # Ovo će stvoriti putanje poput 'model_checkpoints/save_agent.pth'
-for memory in range(4,8):
-    for b in[0.85,0.93]:
+for snake_i in ["nondueling", "dueling"]:
+    for b in[0.85]:
         file_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
         log_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
-        file_name = f'save_simple_snake_log_n3_memory{memory}_gamma{b}'
+        file_name = f'save_simple_snake_log_n3_{snake_i}_gamma{b}'
         log_path_simple = os.path.join(CHECKPOINT_FOLDER, f'{file_name}.csv')
 
-        agent1 = SimpleSnakeAgent(n_step_remember=3, gamma=b, memory= memory, 
+        agent1 = SimpleSnakeAgent(n_step_remember=3, gamma=b, memory= 1,snake_i=snake_i, 
                                   advanced_logging_path= file_name, time_logging_path = file_name)
         #agent1.load_agent_state(str = r"C:\Users\lovro\Desktop\AIBG-9.0-master\simple_snake_game_models\pretrained_net.pth")
 
@@ -102,12 +102,16 @@ for memory in range(4,8):
             vrijeme1 = 0
             vrijeme2 = 0
 
-            if(i == 2500):
+            if(i == 1000):
                 agent1.change_lr(0.0001)
-            if(i == 4500):
+            if(i == 3000):
                 agent1.change_lr(0.00005)
-            if(i == 6500):
+            if(i == 4500):
                 agent1.change_lr(0.00001)
+            if(i == 6000):
+                agent1.change_lr(0.000007)
+            if(i == 7200):
+                agent1.change_lr(0.000004)
 
             sum_count = 0        
             count = 0

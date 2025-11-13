@@ -1,7 +1,7 @@
 import numpy as np
 from q_logic_univerzalno import Agent
 import torch.optim as optim
-from simple_snake_models import SimpleSnakeNN, ResnetSnakeNN_Small, AdvancedSimpleSnakeNN
+from simple_snake_models import SimpleSnakeNN, DuelingSimpleSnakeNN
 from loss_functions import huberLoss
 from q_logic_memory_classes import ReplayBuffer, RewardPriorityReplayBuffer, TDPriorityReplayBuffer
 
@@ -16,10 +16,11 @@ move_names = {"up": 0, # Changed to 0, 1, 2 to match typical 3-action output (st
 
 
 class SimpleSnakeAgent(Agent):
-    def __init__(self, train = True,n_step_remember=1, gamma=0.93, end_priority = 1, memory = 0, advanced_logging_path= False, time_logging_path = False):
-        model = SimpleSnakeNN()
+    def __init__(self, train = True,n_step_remember=1, snake_i="nondueling" ,gamma=0.93, end_priority = 1, memory = 0, advanced_logging_path= False, time_logging_path = False):
+        model = SimpleSnakeNN() if snake_i == "nondueling" else DuelingSimpleSnakeNN()
         optimizer = optim.Adam(model.parameters(),lr=5e-4) 
-
+        memory = ReplayBuffer(n_step_remember =n_step_remember)
+        '''
         if memory == 0:
              memory = ReplayBuffer(n_step_remember =n_step_remember)
         if memory == 1: 
@@ -36,7 +37,7 @@ class SimpleSnakeAgent(Agent):
              memory = RewardPriorityReplayBuffer(n_step_remember =n_step_remember, weights = False, predecesor=True)
         if memory == 7:
              memory = RewardPriorityReplayBuffer(n_step_remember =n_step_remember, weights = False, predecesor=False)
-
+        '''
         super().__init__(model = model, optimizer = optimizer, advanced_logging_path= advanced_logging_path, time_logging_path = time_logging_path,
                          criterion= huberLoss(), train = train, n_step_remember=n_step_remember, memory=memory)  # pozove konstruktor od Agent
         print("SimpleSnakeAgent initialized!")
@@ -61,7 +62,7 @@ class SimpleSnakeAgent(Agent):
             if winner is not None:
                 self.n_games += 1
                 done = 1
-                reward = 1.0 if winner else -1.0
+                reward = 0.05 if winner else -1.0
             
             return reward,done
 

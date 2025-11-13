@@ -172,10 +172,7 @@ class DuelingSimpleSnakeNN(nn.Module):
         )
 
         # Calculate flattened size dynamically
-        dummy_input = torch.randn(1, map_channels, map_height, map_width)
-        with torch.no_grad():
-            conv_out = self.conv_layers(dummy_input)
-            self._conv_out_size = conv_out.view(1, -1).shape[1]
+        self._conv_out_size = self._get_conv_out(map_channels, map_height, map_width)
 
         # --- Metadata fully-connected layers ---
         self.metadata_fc = nn.Sequential(
@@ -188,27 +185,36 @@ class DuelingSimpleSnakeNN(nn.Module):
 
         # --- Combined FC layers ---
         self.fc_value = nn.Sequential(
-            nn.Linear(self._conv_out_size + metadata_out, 512),
-            nn.ReLU(),
-            nn.Linear(512, 256),
+            nn.Linear(self._conv_out_size + metadata_out, 256),
             nn.ReLU(),
             nn.Linear(256, 128),
             nn.ReLU(),
-            nn.Linear(128, 1)
+            nn.Linear(128, 32),
+            nn.ReLU(),
+            nn.Linear(32, 1)
         )
 
         self.fc_advantage = nn.Sequential(
-            nn.Linear(self._conv_out_size + metadata_out, 512),
-            nn.ReLU(),
-            nn.Linear(512, 256),
+            nn.Linear(self._conv_out_size + metadata_out, 256),
             nn.ReLU(),
             nn.Linear(256, 128),
             nn.ReLU(),
-            nn.Linear(128, num_actions)
+            nn.Linear(128, 32),
+            nn.ReLU(),
+            nn.Linear(32, num_actions)
         )
 
         # --- Output layer ---
-        
+    def _get_conv_out(self, c, h, w):
+        was_training = self.conv_layers.training
+        self.conv_layers.eval()
+        with torch.no_grad():
+            x = torch.zeros(1, c, h, w)  # samo za shape
+            out = self.conv_layers(x)
+            flat = out.view(1, -1).shape[1]
+        if was_training:
+            self.conv_layers.train()
+        return flat
 
     def forward(self, map_input, metadata_input):
         map_input = map_input.to(DEVICE)
