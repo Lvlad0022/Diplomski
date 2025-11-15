@@ -22,7 +22,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.optim.lr_scheduler import ExponentialLR 
 import os
 from queue import Queue
 from collections import deque
@@ -32,6 +31,7 @@ from snake_models import AdvancedSnakeNN, ResnetSnakeNN
 from loss_functions import huberLoss
 from q_logic_memory_classes import TDPriorityReplayBuffer, ReplayBuffer, RewardPriorityReplayBuffer
 from q_logic_logging import Advanced_stat_logger, Time_logger
+from q_logic_schedulers import LossAdaptiveLRScheduler, TDAdaptiveScheduler
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -58,7 +58,7 @@ class QTrainer:
         self.criterion = criterion
         self.scheduler = None
         if scheduler:
-            self.scheduler = ExponentialLR(self.optimizer, gamma=0.9999) 
+            self.scheduler = scheduler
         self.model_target_counter = 0
         self.model_target_cycle = 200 # ovo je jako bitno 
         self.model_target_cycle_mult = 1.2
@@ -124,8 +124,7 @@ class QTrainer:
         a = time.time()
         loss.backward()
         self.optimizer.step()
-        if self.scheduler:
-            self.scheduler.step()
+        
         vrijeme_back_prop = time.time()-a
 
         loss = loss.cpu()
@@ -134,7 +133,13 @@ class QTrainer:
         pred_a = pred_a.detach().cpu().numpy().squeeze()
         td_errors = np.abs(target_a - pred_a)
 
-
+        if self.scheduler:
+            if isinstance(self.scheduler, TDAdaptiveScheduler):
+                self.scheduler.step(np.mean(td_errors))
+            elif isinstance(self.scheduler, LossAdaptiveLRScheduler):
+                self.scheduler.step(float(loss))
+            else:
+                self.scheduler.step()
 
         vremena = (vrijeme_move_to_gpu, vrijeme_forward_prop, vrijeme_back_prop)
         return float(loss), td_errors, np.abs(pred_a), vremena
@@ -179,7 +184,8 @@ LR = 0.0005
 # --- Agent Class ---
 class Agent:
 
-    def __init__(self, model, optimizer ,criterion = huberLoss() ,train = True, advanced_logging_path= False, time_logging_path = False, double_q=True ,
+    def __init__(self, model, optimizer ,criterion = huberLoss(), scheduler = False,
+                 train = True, advanced_logging_path= False, time_logging_path = False, double_q=True ,
                  n_step_remember=1, gamma=0.93,memory = ReplayBuffer(), batch_size = BATCH_SIZE):
         
         self.n_games = 0
@@ -205,7 +211,8 @@ class Agent:
         self.model_target.load_state_dict(self.model.state_dict())
         self.model_target.eval() 
 
-        self.trainer = QTrainer(self.model, self.model_target, double_q=double_q, criterion= criterion, optimizer=optimizer, lr = LR,gamma=gamma)
+        self.trainer = QTrainer(self.model, self.model_target, scheduler=scheduler, 
+                                double_q=double_q, criterion= criterion, optimizer=optimizer, lr = LR,gamma=gamma)
          
         #logging
         self.advanced_logger = Advanced_stat_logger(advanced_logging_path, 1000, self.batch_size) if advanced_logging_path else None
@@ -308,11 +315,13 @@ class Agent:
             vrijeme_logging = time.time()-a
 
             vremena_long_term = (vrijeme_sample,vrijeme_update_priorities,vrijeme_logging)
-        
+
+            lr = self.trainer.optimizer.param_groups[0]["lr"]
+
             if self.time_logger is not None:
                 self.time_logger(vremena_long_term, vremena_train,self.n_games)
             if self.advanced_logger is not None:
-                self.advanced_logger(log_train, log_sample,self.n_games)
+                self.advanced_logger(log_train, log_sample,self.n_games,lr )
 
             return loss
         return 0

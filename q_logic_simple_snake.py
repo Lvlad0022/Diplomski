@@ -4,6 +4,7 @@ import torch.optim as optim
 from simple_snake_models import SimpleSnakeNN, DuelingSimpleSnakeNN
 from loss_functions import huberLoss
 from q_logic_memory_classes import ReplayBuffer, RewardPriorityReplayBuffer, TDPriorityReplayBuffer
+from q_logic_schedulers import TDAdaptiveScheduler, LossAdaptiveLRScheduler, WarmupPeakDecayScheduler
 
 move_names = {"up": 0, # Changed to 0, 1, 2 to match typical 3-action output (straight, right, left)
               "right": 1,
@@ -16,11 +17,21 @@ move_names = {"up": 0, # Changed to 0, 1, 2 to match typical 3-action output (st
 
 
 class SimpleSnakeAgent(Agent):
-    def __init__(self, train = True,n_step_remember=1, snake_i="nondueling" ,gamma=0.93, end_priority = 1, memory = 0, advanced_logging_path= False, time_logging_path = False):
+    def __init__(self, train = True,n_step_remember=1, snake_i="nondueling", scheduler= 0  ,gamma=0.93, end_priority = 1, memory = 0, advanced_logging_path= False, time_logging_path = False):
         model = SimpleSnakeNN() if snake_i == "nondueling" else DuelingSimpleSnakeNN()
-        optimizer = optim.Adam(model.parameters(),lr=5e-4) 
-        memory = ReplayBuffer(n_step_remember =n_step_remember)
-        '''
+        optimizer = optim.Adam(model.parameters(),lr=5e-4)# optimizer se uvijek mora poslati scheduleru 
+
+
+        if scheduler == 1:
+            scheduler = TDAdaptiveScheduler(optimizer)
+        elif scheduler == 2:
+            scheduler = LossAdaptiveLRScheduler(optimizer)
+        elif scheduler == 3:
+            scheduler = WarmupPeakDecayScheduler(optimizer)
+
+
+
+        
         if memory == 0:
              memory = ReplayBuffer(n_step_remember =n_step_remember)
         if memory == 1: 
@@ -37,8 +48,8 @@ class SimpleSnakeAgent(Agent):
              memory = RewardPriorityReplayBuffer(n_step_remember =n_step_remember, weights = False, predecesor=True)
         if memory == 7:
              memory = RewardPriorityReplayBuffer(n_step_remember =n_step_remember, weights = False, predecesor=False)
-        '''
-        super().__init__(model = model, optimizer = optimizer, advanced_logging_path= advanced_logging_path, time_logging_path = time_logging_path,
+        
+        super().__init__(model = model, optimizer = optimizer, scheduler=scheduler, advanced_logging_path= advanced_logging_path, time_logging_path = time_logging_path,
                          criterion= huberLoss(), train = train, n_step_remember=n_step_remember, memory=memory)  # pozove konstruktor od Agent
         print("SimpleSnakeAgent initialized!")
   

@@ -62,6 +62,7 @@ class Advanced_stat_logger:
         self.replay_size_vector = np.zeros((update_every,))
         self.norm_vector = np.zeros((update_every,))
         self.loss = np.zeros((update_every,))
+        self.lr_vector = np.zeros((update_every,))
 
         # --- TensorBoard writer ---
         self.writer = SummaryWriter(log_dir=f"{log_dir}/{self.filename}")
@@ -69,7 +70,7 @@ class Advanced_stat_logger:
 
 
     
-    def __call__(self, train_log, sample_log, step):
+    def __call__(self, train_log, sample_log, step, lr):
         td_error, Q_val, episode_count, total_norm, loss = train_log
         experience_age, weights, sample_priorities, replay_size = sample_log
 
@@ -85,6 +86,7 @@ class Advanced_stat_logger:
         self.replay_size_vector[self.count] = replay_size
         self.norm_vector[self.count] = total_norm
         self.loss[self.count] = loss
+        self.lr_vector[self.count] = lr
 
         self.count += 1
         if self.count == self.update_every:
@@ -112,7 +114,7 @@ class Advanced_stat_logger:
         pr_p = percentiles(self.priorities_vector)
         norm_p = percentiles(self.norm_vector)
         loss_mean ={"mean": np.mean(self.loss)}
-
+        lr_mean = {"mean": np.mean(self.lr_vector)}
         
         
         self.writer.add_scalars("train/td_error", td_p, step)
@@ -121,6 +123,7 @@ class Advanced_stat_logger:
         self.writer.add_scalars("train/weights", w_p, step)
         self.writer.add_scalars("train/priorities", pr_p, step)
         self.writer.add_scalars("train/grad_norm", norm_p, step)
+        self.writer.add_scalars("train/loss", loss_mean, step)
         self.writer.add_scalars("train/loss", loss_mean, step)
         
         # --- reset vektora ---
