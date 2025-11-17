@@ -69,8 +69,12 @@ class WarmupPeakDecayScheduler(CustomLRScheduler):
             lr = self.max_lr
 
         else:
-            # Linear decay
             t = self.global_step - (self.warmup_steps + self.peak_steps)
+            if (self.max_lr - t * (self.max_lr - self.final_lr) / self.decay_steps < self.max_lr/10):
+                self.max_lr /= 10
+                self.global_step = 0 # ovo sam novododao cini se zanimljivo
+            # Linear decay
+            
             lr = max(self.final_lr , self.max_lr - t * (self.max_lr - self.final_lr) / self.decay_steps) # decay length
 
         self.set_lr(lr)
@@ -103,13 +107,15 @@ class LossAdaptiveLRScheduler(CustomLRScheduler):
     def __init__(self,
                 optimizer,
                 initial_lr=1e-4,
-                min_lr=5e-6,
+                min_lr=1e-6,
                 max_lr=5e-4,
                 ema_alpha=0.05,            
                 up_threshold=0.98,         
-                down_threshold=1.05,       
-                lr_up_factor=1.03,         
-                lr_down_factor=0.9,   
+                down_threshold=1.02,       
+                lr_up_factor=1.02,         
+                lr_down_factor=0.98,   
+                update_duration = 100,
+                decay_rate = 0.00003
 
             ):
         super().__init__(optimizer, initial_lr, min_lr, max_lr)
@@ -124,32 +130,39 @@ class LossAdaptiveLRScheduler(CustomLRScheduler):
         self.lr_up_factor = lr_up_factor
         self.lr_down_factor = lr_down_factor
 
+        self.last_ema = None
+        self.update_counter = 0
+        self.update_duration = update_duration
+
+        self.decay_rate = decay_rate
+
 
     def step(self, loss_value):
         """Update LR based on loss trend + optional cooldown."""
         
         # Initialize EMA on first call
         if self.ema_loss is None:
+            self.last_ema = loss_value
             self.ema_loss = loss_value
             return self.current_lr
 
-        prev_ema = self.ema_loss
         self.ema_loss = (1 - self.alpha) * self.ema_loss + self.alpha * loss_value
 
-        ratio = loss_value / prev_ema
+        new_lr = self.current_lr * (1-self.decay_rate)
+        if(self.update_counter % self.update_duration == 0):
+            ratio = self.ema_loss / self.last_ema 
+            # Loss spike → reduce lr sharply
+            if ratio > self.down_threshold:
+                new_lr = self.current_lr * self.lr_down_factor
 
-        # Loss spike → reduce lr sharply
-        if ratio > self.down_threshold:
-            new_lr = self.current_lr * self.lr_down_factor
+            # Loss stagnant → gently increase lr
+            elif ratio > self.up_threshold:
+                new_lr = self.current_lr * self.lr_up_factor
 
-        # Loss stagnant → gently increase lr
-        elif ratio > self.up_threshold:
-            new_lr = self.current_lr * self.lr_up_factor
-
-        # Loss decreasing → keep lr
-        else:
-            new_lr = self.current_lr
-
+            self.update_counter =0
+            self.last_ema = self.ema_loss
+        
+        self.update_counter += 1
         # Apply to optimizer
         self.set_lr(new_lr)
 

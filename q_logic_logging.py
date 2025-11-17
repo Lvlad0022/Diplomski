@@ -45,7 +45,8 @@ def make_run_name(
 class Advanced_stat_logger:
     def __init__(self, filename, update_every, batch_size, log_dir="logs/advanced_stats"):
         self.filename = make_run_name(filename)
-        self.filename_csv = f"{self.filename}.csv"
+        self.visits_npy = f"{self.filename}_visits.npy"
+        self.errors_npy = f"{self.filename}_errors.npy"
         self.count = 0
         self.update_every = update_every
         self.batch_size = batch_size
@@ -64,10 +65,41 @@ class Advanced_stat_logger:
         self.loss = np.zeros((update_every,))
         self.lr_vector = np.zeros((update_every,))
 
+        self.num_visits_counter = 0  #ovo je privremeno rjesenje, ako cu trebati bolje vratiti cu se
+        self.num_visits = np.zeros((500_000,))
+        self.td_errors_visits = np.zeros((500_000,))
+
         # --- TensorBoard writer ---
         self.writer = SummaryWriter(log_dir=f"{log_dir}/{self.filename}")
 
 
+    def remember_log(self, num_visits,td_errors, step):
+        if(self.num_visits_counter + len(num_visits) >= self.num_visits.shape[0]):
+            self.num_visits_counter = 0
+            self.save_remember_log(step)
+        self.num_visits[self.num_visits_counter:self.num_visits_counter + len(num_visits)] = np.array(num_visits)
+        self.td_errors_visits[self.num_visits_counter:self.num_visits_counter + len(num_visits)] = np.array(td_errors)
+        self.num_visits_counter += len(num_visits)
+
+    def save_remember_log(self,step):
+        self.writer.add_histogram("td_error/num_visits_hist", self.num_visits, step)
+
+        try:
+            arr = np.load(self.visits_npy)
+        except FileNotFoundError:
+            arr = np.array([], dtype=float)
+        arr = np.concatenate([arr, self.td_errors_visits])
+        np.save(self.visits_npy, arr)
+
+        try:
+            arr = np.load(self.errors_npy)
+        except FileNotFoundError:
+            arr = np.array([], dtype=float)
+        arr = np.concatenate([arr, self.num_visits])
+        np.save(self.errors_npy, arr)
+
+        self.num_visits.fill(0)
+        self.td_errors_visits.fill(0)
 
     
     def __call__(self, train_log, sample_log, step, lr):
@@ -124,7 +156,7 @@ class Advanced_stat_logger:
         self.writer.add_scalars("train/priorities", pr_p, step)
         self.writer.add_scalars("train/grad_norm", norm_p, step)
         self.writer.add_scalars("train/loss", loss_mean, step)
-        self.writer.add_scalars("train/loss", loss_mean, step)
+        self.writer.add_scalars("train/lr", lr_mean, step)
         
         # --- reset vektora ---
         self.td_vector.fill(0)
@@ -162,38 +194,7 @@ class Time_logger:
         # --- TensorBoard ---
         self.writer = SummaryWriter(log_dir=f"{log_dir}/{self.filename}")
 
-        # --- CSV header ---
-        self.fieldnames = [
-            # sample times
-            "sample_mean", "sample_p25", "sample_p50", "sample_p75", "sample_p90", "sample_p99",
-
-            # update priorities times
-            "update_priorities_mean", "update_priorities_p25", "update_priorities_p50",
-            "update_priorities_p75", "update_priorities_p90", "update_priorities_p99",
-
-            # logging times
-            "logging_mean", "logging_p25", "logging_p50", "logging_p75",
-            "logging_p90", "logging_p99",
-
-            # move to gpu times
-            "move_to_gpu_mean", "move_to_gpu_p25", "move_to_gpu_p50",
-            "move_to_gpu_p75", "move_to_gpu_p90", "move_to_gpu_p99",
-
-            # forward times
-            "forward_mean", "forward_p25", "forward_p50", "forward_p75",
-            "forward_p90", "forward_p99",
-
-            # backprop times
-            "backprop_mean", "backprop_p25", "backprop_p50", "backprop_p75",
-            "backprop_p90", "backprop_p99",
-        ]
-
-
-        if not os.path.exists(self.filename_csv):
-            with open(self.filename_csv, mode="w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=self.fieldnames)
-                writer.writeheader()
-
+        
     # ---------------------------------------------------------
     def __call__(self, vremena_long_term, vremena_train,step):
         """

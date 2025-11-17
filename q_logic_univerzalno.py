@@ -247,12 +247,20 @@ class Agent:
 
         next_map_state, next_metadata_state = self.get_state(data_novi)
         
+        num_visits = []
+        td_error_means = []
+
         if done:
             gamma_train = self.gamma ** (len(self.rewards))
             while not len(self.remember_data) == 0:
                 map_state, metadata_state,action = self.remember_data.popleft()
                 experience = (map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, gamma_train)
-                self.memory.push(experience)
+                experience_visits, experience_td_error = self.memory.push(experience)
+
+                if experience_visits is not None: #log handling
+                    num_visits.append(experience_visits)
+                    td_error_means.append(experience_td_error)
+
                 gamma_train = gamma_train / self.gamma
                 reward = self.rewards.popleft()
                 self.rewards_average = (self.rewards_average - reward) / self.gamma
@@ -262,9 +270,18 @@ class Agent:
         elif len(self.rewards) == self.n_step_remember:
             map_state, metadata_state, action = self.remember_data.popleft()
             experience = (map_state, metadata_state, action, self.rewards_average, next_map_state, next_metadata_state, done, self.gamma**self.n_step_remember)
-            self.memory.push(experience)
+            
+            experience_visits, experience_td_error  = self.memory.push(experience)
+
+            if experience_visits is not None: #log handling
+                num_visits.append(experience_visits)    
+                td_error_means.append(experience_td_error)        
+            
             reward = self.rewards.popleft()
             self.rewards_average = (self.rewards_average - reward) / self.gamma
+
+        if (self.advanced_logger is not None) and len(num_visits) >0:
+            self.advanced_logger.remember_log(num_visits, td_error_means,self.n_games)
             
 
     def train_long_term(self):

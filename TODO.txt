@@ -1,5 +1,3 @@
-reduce lr on plateu 
-lr scheduler napraviti
 možda i druge optimizator RMSProp, Adam i AdamW
 
 probati onaj polyak target update
@@ -7,3 +5,7 @@ probati onaj polyak target update
 zanima me isprobavanje novih metodika explotation/exploration - 
 ideja je koristiti dueling network i od advantagea napraviti softmax koji s danim vjerojatnostima ide u danim smjerovima
 mozda staviti jo 1-2% šanse da totalno random odredi smjer
+
+
+
+!!!!! napraviti da pamti koliki je bio td_error na svakom primjeru u prosjeku pa uspoređivati s tim koliko puta ga je samplo

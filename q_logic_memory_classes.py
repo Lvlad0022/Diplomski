@@ -90,7 +90,7 @@ class SumTree:
         if weights.size:
             weights /= weights.max()
 
-        sample_log = (self.head-np.array(data_idxs)%self.capacity, weights, sample_priorities, self.n_entries)
+        sample_log = ((self.head-np.array(data_idxs))%self.capacity, weights, sample_priorities, self.n_entries)
         return data_idxs, weights, sample_priorities, sample_log 
     
     
@@ -151,6 +151,10 @@ class ExperienceMemory:
             self.beta_steps = 10
 
         self.beta_step_counter = 0
+
+
+        self.num_visits=np.zeros((self.capacity,))
+        self.td_errors_log=np.zeros((self.capacity,))
         
     
     def beta(self):
@@ -167,8 +171,11 @@ class ExperienceMemory:
   
 
     def push(self, experience,priority = None): 
+        num_visits = None
+        td_error_mean = None
         if len(self.memory) < self.capacity:
             self.memory.append(experience)
+            
 
             if self.predecesor_bool:
                 if len(self.memory) > self.n_step:
@@ -179,6 +186,9 @@ class ExperienceMemory:
             
         else:
             self.memory[self.counter] = experience
+            num_visits = self.num_visits[self.counter]
+            td_error_mean = self.td_errors_log[self.counter]/ num_visits if self.counter > 0 else 0 
+            self.num_visits[self.counter] = 0
             if self.predecesor_bool:
                 self.predecesor[self.counter] = (self.counter - self.n_step) % self.capacity
                 self.predecesor[(self.counter + self.n_step) % self.capacity] = False 
@@ -188,14 +198,17 @@ class ExperienceMemory:
                 self.priorities.add(init_p**self.alpha(),self.counter)
 
         self.counter = (self.counter+1) % self.capacity
+        return (num_visits, td_error_mean)
     
-    def update_priorities(self, data_idxs, priority):
+    def update_priorities(self, data_idxs, priority, td_errors):
+        # logging
+        self.num_visits[data_idxs] += 1
+        self.td_errors_log[data_idxs] += td_errors
         
         if self.priorities is not None:
             for  data_idx, p in zip(data_idxs, priority):
                 p_update= min(p ** self.alpha(), self.max_priority)
                 self.priorities.update(data_idx, p_update)
-
                 pred_idx = self.predecesor[data_idx]
                 if  pred_idx is not False:
                     p_pred = min(self.max_priority, max( self.priorities.tree[pred_idx], (p * self.gamma**2 )** self.alpha()))
@@ -220,7 +233,6 @@ class ExperienceMemory:
 
             samples = [self.memory[i] for i in data_idxs] 
 
-
         return samples, data_idxs, weights, sample_priorities, sample_log
 
     def __len__(self):
@@ -234,18 +246,18 @@ class TDPriorityReplayBuffer(ExperienceMemory):
     memory koji određuje prioritete s obzirom na TD_error koji je bio tijekom učenja iz sjećanja
     """
     def __init__(self, capacity=100_000, gamma=0.93, n_step_remember=1, weights = True, segment= True, predecesor = False,
-                  alpha_start=0.6, alpha_end=0.6, alpha_steps=1_000_000, beta_start=0.4, beta_end=0.7, beta_steps=200_000, eps=1e-6):
+                  alpha_start=0.6, alpha_end=0.6, alpha_steps=1_000_000, beta_start=0.1, beta_end=0.5, beta_steps=200_000, eps=1e-6):
         super().__init__(capacity = capacity,gamma = gamma, n_step_remember = n_step_remember, priorities= True, weights_bool = weights, segment=segment, predecesor_bool= predecesor, 
                         alpha_start=alpha_start, alpha_end=alpha_end, alpha_steps=alpha_steps, beta_end= beta_end, beta_start= beta_start, beta_steps= beta_steps )
     
         self.eps = eps                  
 
-    def update_priorities(self, indices, td_errors, _):
+    def update_priorities(self, indices, td_errors, priorities):
         priorities = np.abs(td_errors) + self.eps
-        super().update_priorities(indices,priorities)
+        super().update_priorities(indices,priorities,td_errors)
 
     def push(self, experience):
-        super().push(experience, self.max_priority) 
+        return super().push(experience, self.max_priority) 
 
 
 class RewardPriorityReplayBuffer(ExperienceMemory):
@@ -260,14 +272,14 @@ class RewardPriorityReplayBuffer(ExperienceMemory):
         self.eps = eps                  
         self.reward_priority = reward_priority
 
-    def update_priorities(self, indices, _, prob ):
-        priorities = prob * self.gamma**2  # jedino kaj je ovaj prob dignut na alpha i sada ce se opet dici na alpha ali ajde nek ostane ovako za sada
-        super().update_priorities(indices,priorities)
+    def update_priorities(self, indices, td, priorities ):
+        priorities = priorities * self.gamma**2  # jedino kaj je ovaj prob dignut na alpha i sada ce se opet dici na alpha ali ajde nek ostane ovako za sada
+        super().update_priorities(indices,priorities, td)
 
     def push(self, experience):
         reward = experience[3]
         p = 1+ self.reward_priority*abs(reward)
-        super().push(experience, p)
+        return super().push(experience, p)
 
 
 class ReplayBuffer(ExperienceMemory):
@@ -277,5 +289,5 @@ class ReplayBuffer(ExperienceMemory):
     def __init__(self, capacity=100_000, gamma=0.93, n_step_remember=1):
         super().__init__(capacity = capacity, n_step_remember = n_step_remember, priorities=False, weights_bool = False, segment=False, predecesor_bool= False)
     
-    def update_priorities(self, indices, priorities, _):
-        super().update_priorities(indices,priorities)
+    def update_priorities(self, indices, td, priorities):
+        return super().update_priorities(indices,priorities, td)

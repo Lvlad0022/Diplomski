@@ -66,8 +66,8 @@ if not os.path.exists(CHECKPOINT_FOLDER):
 
 # Definiraj relativne putanje za spremanje koristeći os.path.join
 # Ovo će stvoriti putanje poput 'model_checkpoints/save_agent.pth'
-for snake_i in ["nondueling"]:
-    for memory_i in [0,1]:
+for snake_i in ["dueling"]:
+    for memory_i in [3]:
         for scheduler_i in [3]:
             for b in[0.85]:
                 file_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
