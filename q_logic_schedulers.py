@@ -1,3 +1,9 @@
+'''
+file conataining different schedulers, easy to add new ones, 
+for now only warmup scheduler showed promise, only problem is you need to monitor it a bit to see if learning platoes
+RL is more sensitive to learning rate and lr should decay but not too fast, you need to find a sweet spot 
+'''
+
 class CustomLRScheduler:
     def __init__(self, optimizer, initial_lr, min_lr, max_lr, cooldown_bool=True, cooldown_factor = 0.5):
         self.optimizer = optimizer
@@ -46,7 +52,7 @@ class CustomLRScheduler:
 
 
 class WarmupPeakDecayScheduler(CustomLRScheduler):
-    def __init__(self, optimizer, warmup_steps = 2500, peak_steps = 2000,decay_steps = 100_000, initial_lr = 1e-4, max_lr = 5e-4, final_lr = 5e-6):
+    def __init__(self, optimizer, warmup_steps = 2500, peak_steps = 2000,decay_steps = 50_000, initial_lr = 1e-4, max_lr = 5e-4, final_lr = 1e-6):
         super().__init__(optimizer, initial_lr, final_lr, max_lr)
 
         self.warmup_steps = warmup_steps
@@ -70,9 +76,9 @@ class WarmupPeakDecayScheduler(CustomLRScheduler):
 
         else:
             t = self.global_step - (self.warmup_steps + self.peak_steps)
-            if (self.max_lr - t * (self.max_lr - self.final_lr) / self.decay_steps < self.max_lr/10):
-                self.max_lr /= 10
-                self.global_step = 0 # ovo sam novododao cini se zanimljivo
+            if (self.max_lr - t * (self.max_lr - self.final_lr) / self.decay_steps < self.max_lr/8):
+                self.max_lr /= 8
+                self.global_step = (self.warmup_steps + self.peak_steps) # ovo sam novo dodao cini se zanimljivo
             # Linear decay
             
             lr = max(self.final_lr , self.max_lr - t * (self.max_lr - self.final_lr) / self.decay_steps) # decay length

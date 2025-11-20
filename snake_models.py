@@ -1,6 +1,7 @@
 import torch.nn as nn
-import os
 import torch
+import os
+
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

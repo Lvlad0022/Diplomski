@@ -134,6 +134,7 @@ class ExperienceMemory:
         else:
             self.priorities = None
             self.max_priority = 5
+        self.mean_td_error = 0.5
 
         self.segment = segment
         self.alpha_start = alpha_start
@@ -187,8 +188,9 @@ class ExperienceMemory:
         else:
             self.memory[self.counter] = experience
             num_visits = self.num_visits[self.counter]
-            td_error_mean = self.td_errors_log[self.counter]/ num_visits if self.counter > 0 else 0 
+            td_error_mean = self.td_errors_log[self.counter]/ num_visits if num_visits > 0 else 0 
             self.num_visits[self.counter] = 0
+            self.td_errors_log[self.counter] = 0
             if self.predecesor_bool:
                 self.predecesor[self.counter] = (self.counter - self.n_step) % self.capacity
                 self.predecesor[(self.counter + self.n_step) % self.capacity] = False 
@@ -204,6 +206,8 @@ class ExperienceMemory:
         # logging
         self.num_visits[data_idxs] += 1
         self.td_errors_log[data_idxs] += td_errors
+
+        self.mean_td_error = self.mean_td_error*0.99 + np.mean(td_errors)*0.01 
         
         if self.priorities is not None:
             for  data_idx, p in zip(data_idxs, priority):
@@ -258,6 +262,27 @@ class TDPriorityReplayBuffer(ExperienceMemory):
 
     def push(self, experience):
         return super().push(experience, self.max_priority) 
+    
+
+    
+
+class TDPriorityReplayBuffer_2(ExperienceMemory):
+    """
+    memory koji određuje prioritete s obzirom na TD_error koji je bio tijekom učenja iz sjećanja
+    """
+    def __init__(self, capacity=100_000, gamma=0.93, n_step_remember=1, weights = True, segment= True, predecesor = False,
+                  alpha_start=0.6, alpha_end=0.6, alpha_steps=1_000_000, beta_start=0.1, beta_end=0.5, beta_steps=200_000, eps=1e-6):
+        super().__init__(capacity = capacity,gamma = gamma, n_step_remember = n_step_remember, priorities= True, weights_bool = weights, segment=segment, predecesor_bool= predecesor, 
+                        alpha_start=alpha_start, alpha_end=alpha_end, alpha_steps=alpha_steps, beta_end= beta_end, beta_start= beta_start, beta_steps= beta_steps )
+    
+        self.eps = eps                  
+
+    def update_priorities(self, indices, td_errors, priorities):
+        priorities = np.abs(td_errors) + self.eps
+        super().update_priorities(indices,priorities,td_errors)
+
+    def push(self, experience):
+        return super().push(experience, self.mean_td_error) 
 
 
 class RewardPriorityReplayBuffer(ExperienceMemory):

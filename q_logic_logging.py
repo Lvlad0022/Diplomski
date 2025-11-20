@@ -1,8 +1,9 @@
+from torch.utils.tensorboard import SummaryWriter
 import csv
 import os
 import numpy as np
 import datetime
-from torch.utils.tensorboard import SummaryWriter
+
 
 
 class CSVLogger:
@@ -66,8 +67,8 @@ class Advanced_stat_logger:
         self.lr_vector = np.zeros((update_every,))
 
         self.num_visits_counter = 0  #ovo je privremeno rjesenje, ako cu trebati bolje vratiti cu se
-        self.num_visits = np.zeros((500_000,))
-        self.td_errors_visits = np.zeros((500_000,))
+        self.num_visits = np.zeros((250_000,))
+        self.td_errors_visits = np.zeros((250_000,))
 
         # --- TensorBoard writer ---
         self.writer = SummaryWriter(log_dir=f"{log_dir}/{self.filename}")
@@ -82,8 +83,8 @@ class Advanced_stat_logger:
         self.num_visits_counter += len(num_visits)
 
     def save_remember_log(self,step):
-        self.writer.add_histogram("td_error/num_visits_hist", self.num_visits, step)
-
+        #self.writer.add_histogram("td_error/num_visits_hist", self.num_visits, step)
+        
         try:
             arr = np.load(self.visits_npy)
         except FileNotFoundError:
@@ -97,7 +98,7 @@ class Advanced_stat_logger:
             arr = np.array([], dtype=float)
         arr = np.concatenate([arr, self.num_visits])
         np.save(self.errors_npy, arr)
-
+        
         self.num_visits.fill(0)
         self.td_errors_visits.fill(0)
 

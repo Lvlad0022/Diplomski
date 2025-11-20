@@ -1,7 +1,8 @@
 
-from q_logic_simple_snake import SimpleSnakeAgent   
+from q_logic_simple_snake import SimpleSnakeAgent , SimpleSnakeAgent3 
+from q_logic_univerzalno import set_seed
 from simplebot import HeatmapBot
-from q_logic_logging import CSVLogger
+from q_logic_logging import make_run_name, CSVLogger
 import os
 import random
 import time
@@ -59,6 +60,7 @@ id2 = "id2"
 name1 = "ime1"
 name2 = "ime2"
 CHECKPOINT_FOLDER = 'simple_snake_game_models'
+set_seed(42)
 
 # Kreiraj taj folder ako ne postoji
 if not os.path.exists(CHECKPOINT_FOLDER):
@@ -67,15 +69,15 @@ if not os.path.exists(CHECKPOINT_FOLDER):
 # Definiraj relativne putanje za spremanje koristeći os.path.join
 # Ovo će stvoriti putanje poput 'model_checkpoints/save_agent.pth'
 for snake_i in ["dueling"]:
-    for memory_i in [3]:
-        for scheduler_i in [3]:
+    for scheduler_i in [3,4]:
+        for memory_i in [0,6]:
             for b in[0.85]:
                 file_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
                 log_path = os.path.join(CHECKPOINT_FOLDER, 'save_agent.pth')
-                file_name = f'save_simple_snake_log_n3_{snake_i}_memory{memory_i}_scheduler{scheduler_i}_gamma{b}'
-                log_path_simple = os.path.join(CHECKPOINT_FOLDER, f'{file_name}.csv')
+                file_name = f'zsave_simple_snake3_log_n3_{snake_i}_memory{memory_i}_scheduler{scheduler_i}_gamma{b}'
+                log_path_simple = os.path.join(CHECKPOINT_FOLDER, f'{make_run_name(file_name)}.csv')
 
-                agent1 = SimpleSnakeAgent(n_step_remember=3, gamma=b, memory= memory_i,snake_i=snake_i, scheduler=scheduler_i,
+                agent1 = SimpleSnakeAgent3(n_step_remember=3, gamma=b, memory= memory_i,snake_i=snake_i, scheduler=scheduler_i,
                                          advanced_logging_path= file_name, time_logging_path = file_name)#advanced_logging_path= file_name
                 #agent1.load_agent_state(str = r"C:\Users\lovro\Desktop\AIBG-9.0-master\simple_snake_game_models\pretrained_net.pth")
 
@@ -89,6 +91,9 @@ for snake_i in ["dueling"]:
                 win_pct = 0
                 loss_moving_avg= 0
                 for i in range(num_games):
+                    if i==5000:
+                        fhf = 1
+
                     game = SnakeGame()
                     game.add_player({"id": id1, "name": name1})
 

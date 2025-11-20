@@ -8,4 +8,3 @@ mozda staviti jo 1-2% šanse da totalno random odredi smjer
 
 
 
-!!!!! napraviti da pamti koliki je bio td_error na svakom primjeru u prosjeku pa uspoređivati s tim koliko puta ga je samplo

@@ -5,25 +5,17 @@ import random
 import time
 import traceback
 import copy
-
+import os
 
 import torch
+import torch.nn as nn
 import random
 import numpy as np
 from collections import deque
-# Assuming these imports are from your game and helper files
-# from game import SnakeGameAI, Direction, Point
-# from model import Linear_QNet, QTrainer # We will replace Linear_QNet
-# from helper import plot
 import json
 
 # --- Define the AdvancedSnakeNN Model (as provided previously) ---
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
-import os
-from queue import Queue
+
 from collections import deque
 
 
@@ -407,3 +399,18 @@ score_diff_arr = []
 score_arr = []
 survived_arr = []
 
+
+def set_seed(seed: int):
+    # Python / OS / NumPy
+    random.seed(seed)
+    np.random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+
+    # PyTorch CPU
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    # Deterministic ops (optional but recommended)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
