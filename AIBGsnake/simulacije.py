@@ -8,10 +8,13 @@ import sys
 from visuals import draw_game_state, load_sprites
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the path of the parent directory (AIBG-9.0-master/)
 parent_dir = os.path.dirname(current_dir)
+# Add the parent directory to Python's search path
 sys.path.insert(0, parent_dir)
 from logic.game import SnakeGame
 
+# === Agents ===
 
 id1 = "id1" 
 id2 = "id2"

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "q_logic"
+version = "0.0.1"
+description = "Q-learning utilities for snake agents"
+authors = [{ name = "Lovro" }]
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["q_logic*"]

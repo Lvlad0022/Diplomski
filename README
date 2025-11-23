@@ -1,1 +1,4 @@
-The goal is to compare different neural network architectures and reinforcement learning paradigms at playing a PvP based on a classic - Snake.
+The goal is to compare different neural network architectures and reinforcement learning paradigms at solving reinforcement learning problems
+
+upon pulling the environment you shold make an environment according to environment.yml and pip install -e. to install q_logic to the envirnoment
+

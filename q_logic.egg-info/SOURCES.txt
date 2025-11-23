@@ -1,0 +1,11 @@
+pyproject.toml
+q_logic/__init__.py
+q_logic/loss_functions.py
+q_logic/q_logic_logging.py
+q_logic/q_logic_memory_classes.py
+q_logic/q_logic_schedulers.py
+q_logic/q_logic_univerzalno.py
+q_logic.egg-info/PKG-INFO
+q_logic.egg-info/SOURCES.txt
+q_logic.egg-info/dependency_links.txt
+q_logic.egg-info/top_level.txt
