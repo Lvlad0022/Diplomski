@@ -1,4 +1,3 @@
-
 from q_logic_snake import SimpleSnakeAgent
 from simplebot import HeatmapBot
 from q_logic.q_logic_logging import make_run_name, CSVLogger
@@ -67,21 +66,22 @@ if not os.path.exists(CHECKPOINT_FOLDER):
 
 # Definiraj relativne putanje za spremanje koristeći os.path.join
 # Ovo će stvoriti putanje poput 'model_checkpoints/save_agent.pth'
-for snake_i in ["nondueling"]:
-    for scheduler_i in [0,1]:
-        for memory_i in [0,1]:
-            for b in[0.85,0.93]:
-                file_name = make_run_name(f'zsave_simple_snake3_log_n3_{snake_i}_memory{memory_i}_scheduler{scheduler_i}_gamma{b}')
-                log_path_simple = os.path.join(CHECKPOINT_FOLDER, f'{file_name}.csv')
+for snake_i in ["dueling"]:
+    for scheduler_i in [1]:
+        for memory_i in [1]:
+            for b in[0.85]:
+                file_name = f'zsave_simple_snake3_log_n3_{snake_i}_memory{memory_i}_scheduler{scheduler_i}_gamma{b}'
+                file_name_date = make_run_name(file_name)
+                log_path_simple = os.path.join(CHECKPOINT_FOLDER, f'{file_name_date}.csv')
 
-                agent1 = SimpleSnakeAgent(player1_name = name1, n_step_remember=3, gamma=b, memory= memory_i,snake_i=snake_i, scheduler=scheduler_i,
-                                         advanced_logging_path= file_name, time_logging_path = file_name)
+                agent1 = SimpleSnakeAgent(player1_name = name1, n_step_remember=3, gamma=b, memory= memory_i,snake_i=snake_i, scheduler=scheduler_i)
+                                        # advanced_logging_path= file_name, time_logging_path = file_name)
 
                 simplebot = HeatmapBot(name2)
 
 
 
-                num_games = 4000
+                num_games = 10000
 
                 logger = CSVLogger(log_path_simple, fieldnames=[
                     "game", "vrijeme_izvodenja", "vrijeme_treniranja", "sum_reward", "avg_count", "win_pct",
@@ -147,7 +147,7 @@ for snake_i in ["nondueling"]:
                             else:
                                 win_pct = win_pct * 0.99 
 
-                        if(count%8 == 0 and i >5):
+                        if( (i >100 and count%8== 0) or i>1000):
                             sum_count += 1
                             a = time.time()
                             loss = agent1.train_long_term()
@@ -164,8 +164,8 @@ for snake_i in ["nondueling"]:
                     loss_moving_avg = (sum_loss / (sum_count if sum_count else 1)) * 0.01 + loss_moving_avg*0.99
                     vrijeme_treniranja = vrijeme3/(sum_count if sum_count else 1)
 
-                   # if(i%1000==0 and i >100):
-                    #   agent1.save_agent_state(file_name)
+                    if(i%2000==0 and i >100):
+                       agent1.save_agent_state(file_name_date)
                 
                     n_games, epsilon, lr = agent1.get_model_state()
 

@@ -4,7 +4,7 @@ from q_logic.q_logic_univerzalno import Agent
 
 from snake_models import SnakeNN, DuelingSnakeNN
 from q_logic.loss_functions import huberLoss
-from q_logic.q_logic_memory_classes import TDPriorityReplayBuffer_2, ReplayBuffer
+from q_logic.q_logic_memory_classes import TDPriorityReplayBuffer, ReplayBuffer
 from q_logic.q_logic_schedulers import WarmupPeakDecayScheduler
 
 items_names = {"apple": 1,
@@ -52,10 +52,10 @@ class SimpleSnakeAgent(Agent):
         if memory == 0:
              memory = ReplayBuffer(n_step_remember =n_step_remember)
         if memory == 1: 
-             memory = TDPriorityReplayBuffer_2(n_step_remember =n_step_remember)
+             memory = TDPriorityReplayBuffer(n_step_remember =n_step_remember, segment=False)
         
         super().__init__(model = model, optimizer = optimizer, scheduler=scheduler, advanced_logging_path= advanced_logging_path, time_logging_path = time_logging_path,
-                         criterion= huberLoss(), train = train, n_step_remember=n_step_remember, memory=memory)  # pozove konstruktor od Agent
+                         criterion= huberLoss(), train = train, n_step_remember=n_step_remember, memory=memory, batch_size=64)  # pozove konstruktor od Agent
         print("SimpleSnakeAgent initialized!")
         self.player1_name = player1_name
         self.player2_name = None
@@ -70,7 +70,6 @@ class SimpleSnakeAgent(Agent):
             done = 0
             if winner is not None:
                 done = 1
-                self.n_games += 1
                 return 1.0 if data_novi.get('winner') == self.player1_name else -1.0, done
 
             # living bonus
@@ -84,6 +83,8 @@ class SimpleSnakeAgent(Agent):
 
             score_gain = (p1_now - p1_prev) /10
             reward += 0.0005 * score_gain   # <- easy to feel; tune 0.005–0.02
+            if data["players"][self.player1_id].get("lastMoveDirection") == data_novi["players"][self.player1_id].get("lastMoveDirection"):
+                reward -= 0.05
 
             # (optional) late-game pressure if behind
             move_count = data_novi.get("moveCount", 0)

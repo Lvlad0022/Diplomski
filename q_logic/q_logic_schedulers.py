@@ -78,7 +78,7 @@ class WarmupPeakDecayScheduler(CustomLRScheduler):
             t = self.global_step - (self.warmup_steps + self.peak_steps)
             if (self.max_lr - t * (self.max_lr - self.final_lr) / self.decay_steps < self.max_lr/10):
                 if self.final_lr == 1e-6:
-                    self.decay_steps = 80_000
+                    self.decay_steps = 100_000
                 self.max_lr /= 10
                 self.global_step = (self.warmup_steps + self.peak_steps) # ovo sam novo dodao cini se zanimljivo
             # Linear decay

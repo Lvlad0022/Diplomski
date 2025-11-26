@@ -1,1 +1,13 @@
 promjenio sam koliko se često mijenja target_model, ideja je da na početku učenja se često mijenja, pa sve rijeđe
+
+checkpoint  ={
+            "model_state_dict": self.model.state_dict(),
+            "target_state_dict": self.model_target.state_dict(),
+            "epsilon": self.epsilon,
+            "action_counter": self.action_counter,
+            "n_games": self.n_games,
+            "optimizer_state_dict": self.trainer.optimizer.state_dict(),
+            "learning_rate": self.trainer.scheduler.get_lr()
+        }
+
+torch.save(checkpoint, f"{self.save_dir}/zsave_simple_snake3_log_n3_nondueling_memory0_scheduler0_gamma0.85_2025-11-24_14-36-20_2025-11-24_14-36-24.pt")

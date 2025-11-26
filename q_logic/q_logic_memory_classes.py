@@ -68,11 +68,12 @@ class SumTree:
             data_idxs.append(data_idx)
             probs[i] = prob/cum_sum
             sample_priorities[i] = prob
+        probs = np.maximum(probs, 1e-8)
         weights = (1/(self.n_entries * probs)) ** beta
         if weights.size:
             weights /= weights.max()
 
-        sample_log = self.sample_logging((self.head-np.array(data_idxs))%self.capacity, weights, sample_priorities, batch_size, self.n_entries)
+        sample_log = ((self.head-np.array(data_idxs))%self.capacity, weights, sample_priorities, self.n_entries)
         return data_idxs , weights, sample_priorities, sample_log
 
     def sample_segment(self,batch_size,beta=0): # sampla batch_size random brojeva s vjerojatnostima iz priorites, ali tako da prvo podijeli na segmente jednakih duljina pa iz svakog segmenta izabere smaple ovo je kao malo uniformnije dist priorities 
@@ -82,10 +83,11 @@ class SumTree:
         probs = np.zeros((batch_size,))
         sample_priorities = np.zeros((batch_size,))
         for i in range(batch_size):
-            _, prob, data_idx = self.get(np.random.uniform(segment*i, segment*(i+1)))
+            _, priority, data_idx = self.get(np.random.uniform(segment*i, segment*(i+1)))
             data_idxs.append(data_idx)
-            probs[i] = prob/cum_sum
-            sample_priorities[i] = prob
+            probs[i] = priority/cum_sum
+            sample_priorities[i] = priority
+        probs = np.maximum(probs, 1e-8)
         weights = (1/(self.n_entries * probs)) ** beta
         if weights.size:
             weights /= weights.max()
@@ -110,7 +112,7 @@ class ExperienceMemory:
                 predecesor_bool = False, # hoce li se prioriteti propagirat unazad predecesorima
                 segment= True, # hoce li se prioriteti smaplirat po segementima(uniformnije) ili cisto po distribuciji prioriteta
                 gamma = 0.9, # ovo je gamma koji sluzi samo za propagiranje u nazad predecesorima
-                capacity=100_000, 
+                capacity=500_000, 
                 n_step_remember = 1, # koliko se koraka u naprijed gleda reward
                 alpha_start=0.6, 
                 alpha_end = 0.6,            # alpha određuje koliko ce se prioriteti uvažavat  treba biti u intervalu [0,1]: 0 uopće nisu bitni, 1 maksimalno su bitni
@@ -120,7 +122,10 @@ class ExperienceMemory:
                 beta_steps=200_000
                 ): 
         self.memory = []
-        self.predecesor = [False] * capacity
+        
+        self.predecesor = None
+        if predecesor_bool:
+            self.predecesor = [False] * capacity
         self.predecesor_bool = predecesor_bool
         
         self.capacity = capacity
@@ -137,16 +142,19 @@ class ExperienceMemory:
         self.mean_td_error = 0.5
 
         self.segment = segment
+        self.alpha = alpha_start
         self.alpha_start = alpha_start
         self.alpha_end = alpha_end
         self.alpha_steps = alpha_steps
         self.alpha_step_counter = 0
 
         if weights_bool:
+            self.beta = beta_start
             self.beta_start = beta_start
             self.beta_end = beta_end
             self.beta_steps = beta_steps
         else: 
+            self.beta = beta_start
             self.beta_start = 0
             self.beta_end = 0
             self.beta_steps = 10
@@ -158,16 +166,15 @@ class ExperienceMemory:
         self.td_errors_log=np.zeros((self.capacity,))
         
     
-    def beta(self):
-        fraction = min(1.0, self.beta_step_counter / self.beta_steps)
+    def update_beta(self):
         self.beta_step_counter += 1
-        return self.beta_start + fraction * (self.beta_end - self.beta_start)
+        fraction = min(1.0, self.beta_step_counter / self.beta_steps)
+        self.beta =  self.beta_start + fraction * (self.beta_end - self.beta_start)
     
-    
-    def alpha(self):
-        fraction = min(1.0, self.alpha_step_counter / self.alpha_steps)
+    def update_alpha(self):
         self.alpha_step_counter += 1
-        return self.alpha_start + fraction * (self.alpha_end - self.alpha_start)
+        fraction = min(1.0, self.alpha_step_counter / self.alpha_steps)
+        self.alpha = self.alpha_start + fraction * (self.alpha_end - self.alpha_start)
 
   
 
@@ -197,26 +204,27 @@ class ExperienceMemory:
 
         if self.priorities is not None:
                 init_p = self.max_priority if (priority is None or np.isnan(priority)) else float(priority)
-                self.priorities.add(init_p**self.alpha(),self.counter)
+                self.priorities.add(init_p**self.alpha,self.counter)
 
         self.counter = (self.counter+1) % self.capacity
         return (num_visits, td_error_mean)
     
-    def update_priorities(self, data_idxs, priority, td_errors):
+    def update_priorities(self, data_idxs, td, priorities):
         # logging
         self.num_visits[data_idxs] += 1
-        self.td_errors_log[data_idxs] += td_errors
-
-        self.mean_td_error = self.mean_td_error*0.99 + np.mean(td_errors)*0.01 
+        self.td_errors_log[data_idxs] += td
+        self.mean_td_error = self.mean_td_error*0.99 + np.mean(td)*0.01 
+        
+        self.max_priority = max(self.max_priority, np.max(priorities))
         
         if self.priorities is not None:
-            for  data_idx, p in zip(data_idxs, priority):
-                p_update= min(p ** self.alpha(), self.max_priority)
+            for  data_idx, p in zip(data_idxs, priorities):
+                p_update= p ** self.alpha
                 self.priorities.update(data_idx, p_update)
-                pred_idx = self.predecesor[data_idx]
-                if  pred_idx is not False:
-                    p_pred = min(self.max_priority, max( self.priorities.tree[pred_idx], (p * self.gamma**2 )** self.alpha()))
-
+                
+                if self.predecesor_bool is not False and self.predecesor[data_idx] is not False:
+                    pred_idx = self.predecesor[data_idx]
+                    p_pred = min(self.max_priority, max( self.priorities.tree[pred_idx], (p * self.gamma**2 )** self.alpha))
                     self.priorities.update(pred_idx, p_pred)
 
     def sample(self, batch_size):
@@ -230,12 +238,15 @@ class ExperienceMemory:
             sample_log = ((self.counter-np.array(data_idxs))%self.capacity, weights, sample_priorities, len(self.memory))
         else:
             if self.segment :
-                data_idxs, weights, sample_priorities, sample_log = self.priorities.sample_segment(batch_size, self.beta())
+                data_idxs, weights, sample_priorities, sample_log = self.priorities.sample_segment(batch_size, self.beta)
             else:
-                data_idxs, weights, sample_priorities, sample_log = self.priorities.sample(batch_size, self.beta())
+                data_idxs, weights, sample_priorities, sample_log = self.priorities.sample(batch_size, self.beta)
 
 
             samples = [self.memory[i] for i in data_idxs] 
+
+        self.update_alpha()
+        self.update_beta()
 
         return samples, data_idxs, weights, sample_priorities, sample_log
 
@@ -249,23 +260,23 @@ class TDPriorityReplayBuffer(ExperienceMemory):
     """
     memory koji određuje prioritete s obzirom na TD_error koji je bio tijekom učenja iz sjećanja
     """
-    def __init__(self, capacity=100_000, gamma=0.93, n_step_remember=1, weights = True, segment= True, predecesor = False,
+    def __init__(self, capacity=200_000, gamma=0.93, n_step_remember=1, weights = True, segment= True, predecesor = False,
                   alpha_start=0.6, alpha_end=0.6, alpha_steps=1_000_000, beta_start=0.1, beta_end=0.5, beta_steps=200_000, eps=1e-6):
         super().__init__(capacity = capacity,gamma = gamma, n_step_remember = n_step_remember, priorities= True, weights_bool = weights, segment=segment, predecesor_bool= predecesor, 
                         alpha_start=alpha_start, alpha_end=alpha_end, alpha_steps=alpha_steps, beta_end= beta_end, beta_start= beta_start, beta_steps= beta_steps )
     
         self.eps = eps                  
 
-    def update_priorities(self, indices, td_errors, priorities):
-        priorities = np.abs(td_errors) + self.eps
-        super().update_priorities(indices,priorities,td_errors)
+    def update_priorities(self, data_indices, td, priorities):
+        priorities = np.abs(td) + self.eps
+        super().update_priorities(data_indices,td, priorities)
 
     def push(self, experience):
         return super().push(experience, self.max_priority) 
     
 
     
-
+'''
 class TDPriorityReplayBuffer_2(ExperienceMemory):
     """
     memory koji određuje prioritete s obzirom na TD_error koji je bio tijekom učenja iz sjećanja
@@ -277,13 +288,13 @@ class TDPriorityReplayBuffer_2(ExperienceMemory):
     
         self.eps = eps                  
 
-    def update_priorities(self, indices, td_errors, priorities):
-        priorities = np.abs(td_errors) + self.eps
-        super().update_priorities(indices,priorities,td_errors)
+    def update_priorities(self, indices, td, priorities):
+        priorities = np.abs(td) + self.eps
+        super().update_priorities(indices,td, priorities)
 
     def push(self, experience):
         return super().push(experience, self.mean_td_error) 
-
+'''
 
 class RewardPriorityReplayBuffer(ExperienceMemory):
     """
@@ -299,7 +310,7 @@ class RewardPriorityReplayBuffer(ExperienceMemory):
 
     def update_priorities(self, indices, td, priorities ):
         priorities = priorities * self.gamma**2  # jedino kaj je ovaj prob dignut na alpha i sada ce se opet dici na alpha ali ajde nek ostane ovako za sada
-        super().update_priorities(indices,priorities, td)
+        super().update_priorities(indices,td, priorities)
 
     def push(self, experience):
         reward = experience[3]
@@ -315,4 +326,4 @@ class ReplayBuffer(ExperienceMemory):
         super().__init__(capacity = capacity, n_step_remember = n_step_remember, priorities=False, weights_bool = False, segment=False, predecesor_bool= False)
     
     def update_priorities(self, indices, td, priorities):
-        return super().update_priorities(indices,priorities, td)
+        return super().update_priorities(indices,td, priorities)

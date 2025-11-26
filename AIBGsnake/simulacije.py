@@ -5,7 +5,8 @@ import random
 import time
 import sys
 
-from visuals import draw_game_state, load_sprites
+from logic.visuals import draw_game_state, load_sprites
+from q_logic_snake import SimpleSnakeAgent
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 # Get the path of the parent directory (AIBG-9.0-master/)
@@ -26,6 +27,8 @@ file_path_simple = os.path.join(CHECKPOINT_FOLDER, 'save_simple.pth')
 simplebot1 = HeatmapBot(name1)
 simplebot2 = HeatmapBot(name2)
 
+agent1 = SimpleSnakeAgent(player1_name = name1, snake_i="dueling")
+agent1.load_agent_state(r"C:\Users\lovro\Desktop\snake\model_saves\zsave_simple_snake3_log_n3_dueling_memory1_scheduler1_gamma0.85_2025-11-26_00-06-51.pt", training=False)
 
 def serialize_game_state(game):
     return {
@@ -104,7 +107,7 @@ for i in range(num_games):
 
         if not paused or step_once:
             moves = []
-            moves.append({"playerId": id1 , "direction": simplebot1.get_action(data)})
+            moves.append({"playerId": id1 , "direction": agent1.get_action(data)})
             moves.append({"playerId": id2 , "direction": simplebot2.get_action(data)})
             game.process_moves(moves)
 

@@ -222,31 +222,30 @@ class Agent:
 
         checkpoint  ={
             "model_state_dict": self.model.state_dict(),
-            "target_state_dict": self.target_model.state_dict(),
+            "target_state_dict": self.model_target.state_dict(),
             "epsilon": self.epsilon,
             "action_counter": self.action_counter,
             "n_games": self.n_games,
-            "optimizer_state_dict": self.optimizer.state_dict(),
-            "scheduler_state_dict": self.scheduler.state_dict()
+            "optimizer_state_dict": self.trainer.optimizer.state_dict(),
+            "learning_rate": self.trainer.scheduler.get_lr()
         }
 
 
         torch.save(checkpoint, file_path)
         
 
-    def load_agent_state(self, file_name='agent_state.pth', training=True):
-        file_path = f"{self.save_dir}/{file_name}.pt" 
+    def load_agent_state(self, file_path='agent_state.pth', training=True):
         data = torch.load(file_path, map_location="cpu")
 
         self.model.load_state_dict(data["model_state_dict"])
         self.is_training = training
         if training:
-            self.target_model.load_state_dict(data["target_state_dict"])
+            self.model_target.load_state_dict(data["target_state_dict"])
             self.epsilon= data["epsilon"]
             self.n_games= data["n_games"]
             self.action_counter= data["action_counter"]
             self.trainer.optimizer.load_state_dict(data["optimizer_state_dict"])
-            self.trainer.scheduler.load_state_dict(data["scheduler_state_dict"])
+            self.learning_rate(data["learning_rate"])
 
 
 
@@ -273,6 +272,8 @@ class Agent:
         td_error_means = []
 
         if done:
+            self.n_games += 1
+
             gamma_train = self.gamma ** (len(self.rewards))
             while not len(self.remember_data) == 0:
                 map_state, metadata_state,action = self.remember_data.popleft()
