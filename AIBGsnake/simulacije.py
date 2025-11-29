@@ -28,7 +28,7 @@ simplebot1 = HeatmapBot(name1)
 simplebot2 = HeatmapBot(name2)
 
 agent1 = SimpleSnakeAgent(player1_name = name1, snake_i="dueling")
-agent1.load_agent_state(r"C:\Users\lovro\Desktop\snake\model_saves\zsave_simple_snake3_log_n3_dueling_memory1_scheduler1_gamma0.85_2025-11-26_00-06-51.pt", training=False)
+agent1.load_agent_state(r"C:\Users\lovro\Desktop\snake\model_saves\zsave_simple_snake3_log_n3_dueling_memory1_scheduler1_gamma0.85_2025-11-27_10-46-48.pt", training=False)
 
 def serialize_game_state(game):
     return {
@@ -107,6 +107,7 @@ for i in range(num_games):
 
         if not paused or step_once:
             moves = []
+            print( agent1.get_action(data))
             moves.append({"playerId": id1 , "direction": agent1.get_action(data)})
             moves.append({"playerId": id2 , "direction": simplebot2.get_action(data)})
             game.process_moves(moves)

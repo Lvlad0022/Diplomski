@@ -13,6 +13,7 @@ import random
 import numpy as np
 from collections import deque
 import json
+import torch.nn.functional as F
 
 # --- Define the AdvancedSnakeNN Model (as provided previously) ---
 
@@ -29,7 +30,7 @@ class QTrainer:
     Trains the Q-network using experiences.
     Implements the training step for a DQN-like agent.
     """
-    def __init__(self, model,model_target,double_q=True, criterion = nn.MSELoss(), optimizer = None, scheduler = False, lr=0.0005, gamma=0.93):
+    def __init__(self, model,model_target,double_q=True, criterion = nn.MSELoss(), optimizer = None, scheduler = False, gamma=0.93, polyak_update = True):
         """
         Initializes the QTrainer.
 
@@ -38,9 +39,11 @@ class QTrainer:
             lr (float): Learning rate for the optimizer.
             gamma (float): Discount factor for future rewards.
         """
-        self.lr = lr
         self.model = model
         self.model_target = model_target
+
+        self.polyak_update = polyak_update
+        self.polyak_tau = 0.005 
         
         self.optimizer = optimizer
 
@@ -57,7 +60,6 @@ class QTrainer:
     def train_step(self, game_state, action, reward, next_game_state, done, gamma_train,weights):
         self.model_target_update()
 
-        a = time.time()
         game_state = self.to_device(game_state)
         action = action.long().to(DEVICE)
         reward = reward.float().to(DEVICE)
@@ -65,35 +67,26 @@ class QTrainer:
         done = done.bool().to(DEVICE) 
         gamma_train = gamma_train.float().to(DEVICE)
         weights = weights.float().to(DEVICE)
-        vrijeme_move_to_gpu = time.time()-a
 
-        a = time.time() 
         self.model.train()
         pred = self.model(**game_state) 
         
-        action_indices = action.view(-1)                     # [B]
+        action_indices = action.view(-1)
         pred_a = pred.gather(1, action_indices.unsqueeze(1)).squeeze(1)
 
-        # Compute max Q(s', a') from target
         max_next_q = self._compute_bootstrap_q(next_game_state)
-        with torch.no_grad():
-            target_a = reward + gamma_train * max_next_q * (~done)
+        target_a = reward + gamma_train * max_next_q * (~done)
 
-        vrijeme_forward_prop = time.time()-a
 
         # 3: Compute the loss
+
+        
+        loss = F.mse_loss(pred_a, target_a)
         self.optimizer.zero_grad(set_to_none=True)
-
-        loss = self.criterion(target_a, pred_a, weights)   
-        
-        
-
-        a = time.time()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+        #torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
         self.optimizer.step()
         
-        vrijeme_back_prop = time.time()-a
 
         loss = loss.cpu()
 
@@ -101,19 +94,14 @@ class QTrainer:
         pred_a = pred_a.detach().cpu().numpy().squeeze()
         td_errors = np.abs(target_a - pred_a)
 
-        if self.scheduler:
-            if isinstance(self.scheduler, TDAdaptiveScheduler):
-                self.scheduler.step(np.mean(td_errors))
-            elif isinstance(self.scheduler, LossAdaptiveLRScheduler):
-                self.scheduler.step(float(loss))
-            else:
-                self.scheduler.step()
-
-        vremena = (vrijeme_move_to_gpu, vrijeme_forward_prop, vrijeme_back_prop)
-        return float(loss), td_errors, np.abs(pred_a), vremena
+        return float(loss), td_errors, np.abs(pred_a)
 
 
     def model_target_update(self):
+        if self.polyak_update:
+            for target_param, param in zip(self.model_target.parameters(), self.model.parameters()):
+                target_param.data.copy_( (1 - self.polyak_tau) * target_param.data + self.polyak_tau * param.data )
+
         self.model_target_counter += 1
         if(self.model_target_counter > self.model_target_cycle  ):
             self.model_target_counter = 0
@@ -150,7 +138,7 @@ class Agent:
 
     def __init__(self, model, optimizer, possible_actions ,batch_size, criterion = huberLoss(), scheduler = False, 
                  train = True, advanced_logging_path= False, time_logging_path = False, double_q=True ,
-                 n_step_remember=1, gamma=0.93,memory = ReplayBuffer(), save_dir = "model_saves"):
+                 n_step_remember=1, gamma=0.93,memory = ReplayBuffer(), save_dir = "model_saves", polyak_update = True):
         
 
         self.save_dir = save_dir
@@ -182,36 +170,36 @@ class Agent:
         self.model_target.eval() 
 
         self.trainer = QTrainer(self.model, self.model_target, scheduler=scheduler, 
-                                double_q=double_q, criterion= criterion, optimizer=optimizer, lr = LR,gamma=gamma)
+                                double_q=double_q, criterion= criterion, optimizer=optimizer,gamma=gamma, polyak_update=polyak_update)
          
-        #logging
         self.advanced_logger = Advanced_stat_logger(advanced_logging_path, 1000, self.batch_size) if advanced_logging_path else None
         self.time_logger =  Time_logger(time_logging_path) if time_logging_path else None
 
 
-    def return_counter(self):
-        return self.counter
-
-    def save_agent_state(self, file_name='agent_state.pth'):
+    def save_agent_state(self, file_name='agent_state.pth', training = False):
         os.makedirs(self.save_dir, exist_ok=True)
         file_path = f"{self.save_dir}/{file_name}.pt" 
 
-        checkpoint  ={
-            "model_state_dict": self.model.state_dict(),
-            "target_state_dict": self.model_target.state_dict(),
-            "epsilon": self.epsilon,
-            "action_counter": self.action_counter,
-            "n_games": self.n_games,
-            "optimizer_state_dict": self.trainer.optimizer.state_dict(),
-            "learning_rate": self.trainer.scheduler.get_lr()
-        }
-
+        if training:
+            checkpoint  ={
+                "model_state_dict": self.model.state_dict(),
+                "target_state_dict": self.model_target.state_dict(),
+                "epsilon": self.epsilon,
+                "action_counter": self.action_counter,
+                "n_games": self.n_games,
+                "optimizer_state_dict": self.trainer.optimizer.state_dict(),
+                "learning_rate": self.trainer.scheduler.get_lr()
+            }
+        else:
+            checkpoint  ={
+                "model_state_dict": self.model.state_dict(),
+            }
 
         torch.save(checkpoint, file_path)
         print("agent state saved")
         
 
-    def load_agent_state(self, file_path='agent_state.pth', training=True):
+    def load_agent_state(self, file_path='agent_state.pth', training=False):
         data = torch.load(file_path, map_location="cpu")
 
         self.model.load_state_dict(data["model_state_dict"])
@@ -225,15 +213,8 @@ class Agent:
             self.learning_rate(data["learning_rate"])
 
 
-
-        
-
-    def change_weights(self, other):
-        self.model.load_state_dict(other.model.state_dict())
-
-    def get_model_state(self):
-        return self.n_games, self.epsilon, self.trainer.optimizer.param_groups[0]["lr"]
-
+    def return_counter(self):
+        return self.counter
 
     def remember(self, data, data_novi):
         memory_state = self.get_memory_state(data)
@@ -304,7 +285,7 @@ class Agent:
             gamma_train = torch.tensor(np.array(gamma_train), dtype=torch.float)
             weights = torch.tensor(np.array(weights), dtype=torch.float)
 
-            loss, td, Q_val, vremena_train =self.trainer.train_step(game_states, actions, rewards, next_game_states, dones,gamma_train, weights)
+            loss, td, Q_val =self.trainer.train_step(game_states, actions, rewards, next_game_states, dones,gamma_train, weights)
 
             a = time.time()
             self.memory.update_priorities(idxs, td, sample_priorities)
@@ -327,8 +308,6 @@ class Agent:
 
             lr = self.trainer.optimizer.param_groups[0]["lr"]
 
-            if self.time_logger is not None:
-                self.time_logger(vremena_long_term, vremena_train,self.n_games)
             if self.advanced_logger is not None:
                 self.advanced_logger(log_train, log_sample,self.n_games,lr )
 
@@ -340,27 +319,14 @@ class Agent:
     
     def get_action(self, data):
         self.action_counter += 1
-        """
-        Chooses an action based on the current state using an epsilon-greedy strategy.
-
-        Args:
-            map_state (np.ndarray): The current map state.
-            metadata_state (np.ndarray): The current metadata state.
-
-        Returns:
-            list: The chosen action (one-hot encoded).
-        """
-        # random moves: tradeoff exploration / exploitation
-        # Decay epsilon as games progress
         game_state = self.get_state(data)
         game_state = self.to_device(game_state)
 
         
-        final_move = np.zeros((self.num_actions,)) # Assuming 4 possible actions (straight, right, left)
+        final_move = np.zeros((self.num_actions,)) 
 
         
-        if(self.action_counter%1==0 and self.epsilon):
-            self.epsilon = max(self.epsilon_min , self.epsilon * self.epsilon_decay)
+        self.epsilon = max(self.epsilon_min , self.epsilon * self.epsilon_decay)
 
         if random.uniform(0, 1) < self.epsilon and self.is_training: # Increased random range for slower decay
             # Exploration: Choose a random action

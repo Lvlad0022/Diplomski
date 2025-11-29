@@ -261,7 +261,7 @@ class TDPriorityReplayBuffer(ExperienceMemory):
     memory koji određuje prioritete s obzirom na TD_error koji je bio tijekom učenja iz sjećanja
     """
     def __init__(self, capacity=200_000, gamma=0.93, n_step_remember=1, weights = True, segment= True, predecesor = False,
-                  alpha_start=0.6, alpha_end=0.6, alpha_steps=1_000_000, beta_start=0.1, beta_end=0.5, beta_steps=200_000, eps=1e-6):
+                  alpha_start=0.5, alpha_end=0.5, alpha_steps=1_000_000, beta_start=0.3, beta_end=1, beta_steps=100_000, eps=1e-6):
         super().__init__(capacity = capacity,gamma = gamma, n_step_remember = n_step_remember, priorities= True, weights_bool = weights, segment=segment, predecesor_bool= predecesor, 
                         alpha_start=alpha_start, alpha_end=alpha_end, alpha_steps=alpha_steps, beta_end= beta_end, beta_start= beta_start, beta_steps= beta_steps )
     

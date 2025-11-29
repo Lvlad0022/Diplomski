@@ -84,7 +84,7 @@ class SimpleSnakeAgent(Agent):
             score_gain = (p1_now - p1_prev) /10
             reward += 0.0005 * score_gain   # <- easy to feel; tune 0.005–0.02
             if data["players"][self.player1_id].get("lastMoveDirection") == data_novi["players"][self.player1_id].get("lastMoveDirection"):
-                reward -= 0.05
+                reward -= 1
 
             # (optional) late-game pressure if behind
             move_count = data_novi.get("moveCount", 0)

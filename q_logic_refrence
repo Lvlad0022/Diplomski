@@ -1,0 +1,47 @@
+import torch.optim as optim
+import torch
+import numpy as np
+from q_logic.q_logic_univerzalno import Agent
+
+from cartpole_model import cartpoleNN
+from q_logic.loss_functions import huberLoss
+from q_logic.q_logic_memory_classes import TDPriorityReplayBuffer, ReplayBuffer
+from q_logic.q_logic_schedulers import WarmupPeakDecayScheduler
+
+
+
+class catrpoleAgent(Agent):
+    def __init__(self, train = True,n_step_remember=1,  gamma=0.93, end_priority = 1, memory = 0, advanced_logging_path= False, time_logging_path = False, model = None, double_q = False):
+
+        model = #costum model architecture 
+        optimizer = optim.Adam(model.parameters(),lr=5e-4)
+        memory = ReplayBuffer()
+
+        possible_actions = # a dictionary that contains possible actions example:
+        """
+        dict = {0:"up",1:"down",2:"right",3:"left"}
+        """
+                
+        super().__init__(model = model, gamma = gamma, optimizer = optimizer, advanced_logging_path= advanced_logging_path,possible_actions =possible_actions,
+                         criterion= huberLoss(), train = train, n_step_remember=n_step_remember, memory=memory, batch_size=64, double_q = double_q)  # pozove konstruktor od Agent
+        
+
+    def give_reward(self, data_novi, data, akcija):
+        # needs to return reward for action that was taken at data and resulted in data_novi
+
+    def get_state(self, data):
+        """
+        takes raw environment data 
+        returns a dictionary with all inputs model takes in 
+        you should name dict elelments as they are named in the model exapmle:
+         {"data": torch.tensor(np.array(data), dtype=torch.float)}
+         """
+    
+    def memory_to_model(self, memory_state):
+        # returns a memory efficient form of data
+
+    def get_memory_state(self, data):
+        # takes in memory efficent form of data from above function
+        #it will be in a tuple 
+        #returns a tuple of dictionaries as in get_state
+        

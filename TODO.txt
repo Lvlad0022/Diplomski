@@ -1,10 +1,13 @@
 možda i druge optimizator RMSProp, Adam i AdamW
 
-probati onaj polyak target update
 
 zanima me isprobavanje novih metodika explotation/exploration - 
 ideja je koristiti dueling network i od advantagea napraviti softmax koji s danim vjerojatnostima ide u danim smjerovima
 mozda staviti jo 1-2% šanse da totalno random odredi smjer
 
+probati kako uci s huber lossom - to na acrobotu 
 
+probati noisy net exploration
+
+implementirati dueling za snake
 
