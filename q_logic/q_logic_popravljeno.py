@@ -30,7 +30,7 @@ class QTrainer:
     Trains the Q-network using experiences.
     Implements the training step for a DQN-like agent.
     """
-    def __init__(self, model,model_target,double_q=True, criterion = nn.MSELoss(), optimizer = None, scheduler = False, gamma=0.93, polyak_update = True):
+    def __init__(self, model,model_target,double_q=True, noisy_net = False, criterion = nn.MSELoss(), optimizer = None, scheduler = False, gamma=0.93, polyak_update = True):
         """
         Initializes the QTrainer.
 
@@ -56,6 +56,7 @@ class QTrainer:
         self.model_target_update_counter = 0
 
         self.double_q = double_q
+        self.noisy_net = noisy_net
 
     def train_step(self, game_state, action, reward, next_game_state, done, gamma_train,weights):
         self.model_target_update()
@@ -68,7 +69,12 @@ class QTrainer:
         gamma_train = gamma_train.float().to(DEVICE)
         weights = weights.float().to(DEVICE)
 
+
         self.model.train()
+        
+        if self.noisy_net:
+            self.model.reset_noise()
+            self.model_target.reset_noise()
         pred = self.model(**game_state) 
         
         action_indices = action.view(-1)
@@ -113,7 +119,6 @@ class QTrainer:
         Returns max_next_q for each sample, either DQN-style or Double DQN-style.
         """
         # Q_target(s', :)
-        self.model_target.eval()
         with torch.no_grad():
             q_next_target = self.model_target(**next_game_state)
 
@@ -138,7 +143,7 @@ class Agent:
 
     def __init__(self, model, optimizer, possible_actions ,batch_size, criterion = huberLoss(), scheduler = False, 
                  train = True, advanced_logging_path= False, time_logging_path = False, double_q=True ,
-                 n_step_remember=1, gamma=0.93,memory = ReplayBuffer(), save_dir = "model_saves", polyak_update = True):
+                 n_step_remember=1, gamma=0.93,memory = ReplayBuffer(), save_dir = "model_saves", polyak_update = True, noisy_net = False):
         
 
         self.save_dir = save_dir
@@ -146,10 +151,12 @@ class Agent:
         self.num_actions = len(possible_actions)
 
 
+        self.noisy_net = noisy_net
+        self.epsilon = 0.9         
+        self.epsilon_min =  0   
+        self.epsilon_decay =  0.995
+
         self.n_games = 0
-        self.epsilon = 0.9           
-        self.epsilon_min = 0.05      
-        self.epsilon_decay = 0.995
         self.gamma = gamma
         self.action_counter= 0
         self.batch_size = batch_size
@@ -168,8 +175,10 @@ class Agent:
         self.model_target =  copy.deepcopy(model).to(DEVICE)
         self.model_target.load_state_dict(self.model.state_dict())
         self.model_target.eval() 
+        if noisy_net:
+            self.model_target.train()
 
-        self.trainer = QTrainer(self.model, self.model_target, scheduler=scheduler, 
+        self.trainer = QTrainer(self.model, self.model_target, scheduler=scheduler,  noisy_net= noisy_net,
                                 double_q=double_q, criterion= criterion, optimizer=optimizer,gamma=gamma, polyak_update=polyak_update)
          
         self.advanced_logger = Advanced_stat_logger(advanced_logging_path, 1000, self.batch_size) if advanced_logging_path else None
@@ -199,11 +208,13 @@ class Agent:
         print("agent state saved")
         
 
-    def load_agent_state(self, file_path='agent_state.pth', training=False):
+    def load_agent_state(self, file_path='agent_state.pth', training=False, noisynet = False):
         data = torch.load(file_path, map_location="cpu")
 
         self.model.load_state_dict(data["model_state_dict"])
         self.is_training = training
+        if noisynet:
+            self.model.is_training = training
         if training:
             self.model_target.load_state_dict(data["target_state_dict"])
             self.epsilon= data["epsilon"]
@@ -325,25 +336,40 @@ class Agent:
         
         final_move = np.zeros((self.num_actions,)) 
 
-        
-        self.epsilon = max(self.epsilon_min , self.epsilon * self.epsilon_decay)
-
-        if random.uniform(0, 1) < self.epsilon and self.is_training: # Increased random range for slower decay
-            # Exploration: Choose a random action
-            move = random.randint(0, self.num_actions-1)
-            final_move[move] = 1
-            move_direction = self.possible_actions[move]
-        else:
-            self.model.eval()
+        if self.noisy_net and self.is_training:
+            self.model.train() 
+            self.model.reset_noise()
             with torch.no_grad():
-                prediction = self.model(**game_state).cpu()
-            self.model.train()            # Set model back to training mode after inference
+                self.model.ratios = True
+                prediction, ratios = self.model(**game_state)
+                prediction = prediction.cpu()
+                self.model.ratios = False
             move = torch.argmax(prediction).item()
             final_move[move] = 1
             move_direction = self.possible_actions[move]
+            self.last_action = final_move
+            return move_direction, ratios  
+        
+        else:
+            self.epsilon = max(self.epsilon_min , self.epsilon * self.epsilon_decay)
+            if  random.uniform(0, 1) < self.epsilon and self.is_training: # Increased random range for slower decay
+                # Exploration: Choose a random action
+                move = random.randint(0, self.num_actions-1)
+                final_move[move] = 1
+                move_direction = self.possible_actions[move]
+            else:
+                self.model.eval()
+                with torch.no_grad():
+                    prediction = self.model(**game_state).cpu()
+                self.model.train()
+                move = torch.argmax(prediction).item()
+                final_move[move] = 1
+                move_direction = self.possible_actions[move]
+            
+            
 
         self.last_action = final_move
-        return move_direction
+        return move_direction,
     
     def to_device(self, state_dict):
         return {k: v.to(DEVICE) for k, v in state_dict.items()}
