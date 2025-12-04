@@ -1,6 +1,6 @@
 import torch.optim as optim
 import numpy as np
-from q_logic.q_logic_univerzalno import Agent
+from Diplomski.q_logic.q_logic import Agent
 
 from snake_models import SnakeNN, DuelingSnakeNN
 from q_logic.loss_functions import huberLoss

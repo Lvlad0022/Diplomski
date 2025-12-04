@@ -4,53 +4,74 @@ import numpy as np
 from q_logic.q_logic import Agent
 from math import cos
 
-from model_snake import DQN, DQNnoisy, DQNnoisy2, load_backbone_only
+from models import DQN, DQNnoisy, DQNnoisy2
 from q_logic.loss_functions import huberLoss
 from q_logic.q_logic_memory_classes import TDPriorityReplayBuffer, ReplayBuffer
 from q_logic.q_logic_schedulers import WarmupPeakDecayScheduler
 
 
+"""
+example of user agent and all the functions it has to have
+"""
 
-class snakeAgent(Agent):
+
+class userAgent(Agent): #inheriting from q_logic Agent 
     def __init__(self, train = True,n_step_remember=1,  gamma=0.93, priority = False, memory = 0, advanced_logging_path= False, time_logging_path = False, model = None, double_q = False, polyak = True, noisy_net = False):
-        self.reward_policy = True
+        
         model =DQNnoisy(is_training=True) if noisy_net else DQN()
          
         optimizer = optim.Adam(model.parameters(),lr=5e-4)
         scheduler = WarmupPeakDecayScheduler(optimizer,max_lr=5e-4, final_lr=5e-6, initial_lr=5e-4, decay_steps= 500_000)
 
-        memory = ReplayBuffer()
+        memory = ReplayBuffer() # memory needs to be from given memory options in q_logic_memory_classes
+                                # it is either uniform memory or td error priority
         if priority:
             memory = TDPriorityReplayBuffer()
 
-        possible_actions = [0,1,2,3]
+        possible_actions = [0,1,2,3] # you need to give possible actions to the agent actions can be any python object
                 
         super().__init__(model = model, polyak_update=polyak, gamma = gamma, optimizer = optimizer, scheduler=scheduler, advanced_logging_path= advanced_logging_path,possible_actions =possible_actions,
                          criterion= huberLoss(), train = train, n_step_remember=n_step_remember, memory=memory, batch_size=64, double_q = double_q, noisy_net=noisy_net)  # pozove konstruktor od Agent
-        
+    
+    """
+    every agent has to have theese functions:
+    """
 
     def give_reward(self, data_novi, data, akcija):
+        # costumize reward function, needs to return a number for reward and boolian done if episude ended this move or not
         data_novi, snake_state,reward, jabuka,done = data_novi
-        if self.reward_policy == True:
-            if done:
-                reward = -1
-            elif jabuka == 50:
-                done = True
-                reward = 1
-            elif reward < 1:
-                reward = -0.05
-            else:
-                reward = 1
+        if done:
+            reward = -1
+        elif jabuka == 50:
+            done = True
+            reward = 1
+        elif reward < 1:
+            reward = -0.05
+        else:
+            reward = 1
         return reward, done
 
     def get_state(self, data):
+        """
+        returns a dictionary of torch tensors used for pytorch training
+        keys NEED to have same names as parameters in pytorch model forward function that will be used
+        """
         data, snake_state, reward, jabuka, done = data
         return {"x": torch.tensor(np.array(data))}
     
     def memory_to_model(self, memory_state):
+        """
+        returns state in suitable data structure that takes up small amount of space 
+        if you want a lot of emmory in the buffer and you are limited on RAM
+        """
         return memory_state
 
     def get_memory_state(self, data):
+        """
+        takes  memory to model output and
+        outputs same output as get state
+        in this example there was no need for better memory data usage 
+        """
         return self.get_state(data)
         
 
@@ -61,22 +82,10 @@ class snakeAgent2(Agent):
         self.reward_policy = True
         self.survive_reward = 0
         model =DQNnoisy2(is_training=True, map_channels=4) if noisy_net else DQN(map_channels=4)
-        load_backbone_only(model, r"C:\Users\lovro\Desktop\snake\Diplomski\level2\classicSnake\model_saves\pretrain_model_2025-12-04_13-31-51.pt")
          
-        backbone_params = []
-        head_params = []
-        for name, param in model.named_parameters():
-            if 'backbone' in name:
-                backbone_params.append(param)
-            else:
-                head_params.append(param)
-        optimizer = optim.Adam([
-            {'params': backbone_params, 'lr': 5e-5},  
-            {'params': head_params, 'lr': 5e-4}      
-        ])
+        optimizer = optim.Adam(model.parameters(),lr=5e-4)
+        scheduler = WarmupPeakDecayScheduler(optimizer,max_lr=5e-4, final_lr=5e-6, initial_lr=5e-4, decay_steps= 50_000)
 
-        #scheduler = WarmupPeakDecayScheduler(optimizer,max_lr=[5e-4], final_lr=5e-6, initial_lr=5e-4, decay_steps= 50_000)
-        scheduler = None
         memory = ReplayBuffer()
         if priority:
             memory = TDPriorityReplayBuffer()

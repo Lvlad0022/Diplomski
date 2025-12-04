@@ -4,7 +4,7 @@ import os
 import random
 import time
 import sys
-from q_logic.q_logic_univerzalno import set_seed
+from Diplomski.q_logic.q_logic import set_seed
 
 set_seed(42)
 

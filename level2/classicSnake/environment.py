@@ -25,14 +25,14 @@ class SimpleSnakeEnv:
 
         self._spawn_apple()
 
-        return self._get_obs()
+        return self._get_obs(), self.snake
 
     # ---------------------
     # Step
     # ---------------------
     def step(self, action):
         if self.done:
-            return self._get_obs(), 0.0, True, {}
+            return self._get_obs(),self.snake, 0.0, True, {}
 
         # Convert action to direction
         if action == 0:
@@ -57,12 +57,12 @@ class SimpleSnakeEnv:
         # Collision: wall
         if nx < 0 or nx >= self.size or ny < 0 or ny >= self.size:
             self.done = True
-            return self._get_obs(), self.death_penalty, True, {}
+            return self._get_obs(),self.snake, self.death_penalty, True, {}
 
         # Collision: self
         if (nx, ny) in self.snake:
             self.done = True
-            return self._get_obs(), self.death_penalty, True, {}
+            return self._get_obs(),self.snake, self.death_penalty, True, {}
 
         # Move snake
         new_head = (nx, ny)
@@ -80,7 +80,7 @@ class SimpleSnakeEnv:
             self.snake.pop()
 
         self.steps += 1
-        return self._get_obs(), reward, False, {}
+        return self._get_obs(),self.snake,  reward, False, {}
 
     # ---------------------
     # Apple spawn

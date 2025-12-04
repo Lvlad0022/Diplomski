@@ -13,7 +13,7 @@ def main():
     
 
     for i in range(500):
-        state = env.reset()
+        state, snake = env.reset()
         done = False
         count = 0
         jabuka = 0
@@ -24,9 +24,9 @@ def main():
             if(count <0):
                 action = random.randint(0,3)
             else:
-                action, _ = agent1.get_action((state,reward,jabuka,done))
+                action = agent1.get_action((state,snake,reward,jabuka,done))
 
-            state, reward,done, info = env.step(action)
+            state, snake, reward,done, info = env.step(action)
             env.render()
             time.sleep(0.1)
 

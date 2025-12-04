@@ -1,6 +1,6 @@
 
 from q_logic_simple_snake import SimpleSnakeAgent , SimpleSnakeAgent3 
-from q_logic.q_logic_univerzalno import set_seed
+from Diplomski.q_logic.q_logic import set_seed
 from q_logic.q_logic_logging import make_run_name, CSVLogger
 import os
 import random

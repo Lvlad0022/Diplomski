@@ -1,10 +1,10 @@
-from q_logic_snake import snakeAgent
+from q_logic_snake import snakeAgent, snakeAgent2
 from q_logic.q_logic_logging import make_run_name, CSVLogger
 import os
 import random
 import time
 import sys
-from q_logic.q_logic_univerzalno import set_seed
+from q_logic.q_logic import set_seed
 
 set_seed(42)
 
@@ -18,13 +18,13 @@ def main():
             for priority in [True]:
                 for noisyNet in [True]:
                     gamma = 0.99
-                    file_name = make_run_name(f"snake__polyak{polyak}_gamma{gamma}_doubleq{double_q}_priority{priority}_noisynet{noisyNet}_no_survive_reward")
+                    file_name = make_run_name(f"snake__polyak{polyak}_gamma{gamma}_doubleq{double_q}_priority{priority}_noisynet{noisyNet}_zero_survive_reward")
 
                     logger = CSVLogger(file_name, fieldnames=[
                             "game", "avg_count", "avg_reward","avg_jabuka","vrijeme" ])
 
 
-                    agent1 = snakeAgent(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, advanced_logging_path=file_name, polyak = polyak )
+                    agent1 = snakeAgent2(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, advanced_logging_path=file_name, polyak = polyak )
                     
                     num_games = 6000
                     avg_count = 10
@@ -36,7 +36,7 @@ def main():
                         # Create environment with human render mode
                         env = SimpleSnakeEnv(size = 10)
 
-                        state = env.reset()
+                        state, snake_state = env.reset()
                         done = False
                         reward = 0
                         count = 0
@@ -50,20 +50,20 @@ def main():
                             count += 1
                             # Random action just to view the game
                             if noisyNet:
-                                action, ratios = agent1.get_action((state,reward,jabuka,done))
+                                action, ratios = agent1.get_action((state,snake_state,reward,jabuka,done))
                             else:
-                                action = agent1.get_action((state,reward,jabuka,done))
+                                action = agent1.get_action((state,snake_state,reward,jabuka,done))
                                 
-                            state_novi, reward_novi, done_novi, info = env.step(action)
+                            state_novi, snake_state_novi,reward_novi, done_novi, info = env.step(action)
                             if reward >= 0.5:
                                 jabuka_novi += 1
 
-                            agent1.remember((state,reward,jabuka,done),(state_novi,reward_novi,jabuka_novi,done_novi))
+                            agent1.remember((state,snake_state,reward,jabuka,done),(state_novi,snake_state_novi,reward_novi,jabuka_novi,done_novi))
 
                             
                             agent1.train()
                             
-                            reward,done = agent1.give_reward((state_novi, reward_novi,jabuka_novi, done_novi),(state, reward, jabuka,done),action)
+                            reward_novi,done_novi = agent1.give_reward((state_novi, snake_state, reward_novi,jabuka_novi, done_novi),(state, snake_state, reward, jabuka,done),action)
                             
                             state = state_novi
                             done = done_novi
