@@ -7,7 +7,7 @@ from math import cos
 from model_snake import DQN, DQNnoisy, DQNnoisy2, load_backbone_only
 from q_logic.loss_functions import huberLoss
 from q_logic.q_logic_memory_classes import TDPriorityReplayBuffer, ReplayBuffer
-from q_logic.q_logic_schedulers import LinearDecayScheduler
+from q_logic.q_logic_schedulers import LinearDecayScheduler, CosineAnealSchedulerWarmReset
 
 
 
@@ -17,7 +17,7 @@ class snakeAgent(Agent):
         model =DQNnoisy2(is_training=True) if noisy_net else DQN()
          
         optimizer = optim.Adam(model.parameters(),lr=5e-4)
-        scheduler = LinearDecayScheduler(optimizer,max_lr=5e-4, final_lr=5e-6, initial_lr=5e-4, decay_steps= 200_000)
+        scheduler = CosineAnealSchedulerWarmReset(optimizer)
 
         memory = ReplayBuffer()
         if priority:
