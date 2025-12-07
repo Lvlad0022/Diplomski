@@ -1,0 +1,10 @@
+Trenutno treniram snake model ima tri kanala, koristi backbone class iz model_snake
+polyak, doubleDQN, noisy net, priority replay su svi True
+i ima neki scheduler sa 200k koraka samo što sam stavio na 500k kada je dosao do 200k imax rl je pao na 5e-5 jer mi se činilo da je prebrzo pa sam ga usporio
+
+probati novi cosine scheduler
+
+pustiti cu da to istrenira pa cu probati s agentom koji ima 4 kanala gdje je cetvrti kanal pozicija repa
+
+nakon toga cu probati s cetvrtim kanalom koji je onaj koji kaze koliko svaki dio tijela ima do nestanka
+ali tako da ću te tezine postaviti na nulu, ali samo u prvom conv layeru, a ostale tezine ce biti iste kao ovaj snake model na pocetku dokumenta

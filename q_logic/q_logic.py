@@ -111,7 +111,7 @@ class Agent:
         self.is_training = training
         if noisynet:
             self.model.is_training = training
-        if training:
+        if False and training: #bakcata cemo se kasnije s ovime 
             self.model_target.load_state_dict(data["target_state_dict"])
             self.epsilon= data["epsilon"]
             self.n_games= data["n_games"]
@@ -245,7 +245,7 @@ class Agent:
             final_move[move] = 1
             move_direction = self.possible_actions[move]
             self.last_action = final_move
-            return move_direction, ratios  
+            return move_direction ,ratios 
         
         else:
             self.epsilon = max(self.epsilon_min , self.epsilon * self.epsilon_decay)

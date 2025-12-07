@@ -203,6 +203,9 @@ class backbone_model(nn.Module):
 
             nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
         )
 
         self.pool = nn.AdaptiveAvgPool2d((1,1))

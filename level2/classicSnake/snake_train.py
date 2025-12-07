@@ -12,27 +12,27 @@ set_seed(42)
 from environment import SimpleSnakeEnv
 import time
 
+
 def main():
-    for polyak in [True]:
+    polyak = True
+    for i in [1,2,3,4]:
         for double_q in [True]:
             for priority in [True]:
                 for noisyNet in [True]:
                     gamma = 0.99
-                    file_name = make_run_name(f"snake__polyak{polyak}_gamma{gamma}_doubleq{double_q}_priority{priority}_noisynet{noisyNet}_zero_survive_reward")
+                    file_name = make_run_name(f"snakeagent1__polyak{polyak}_gamma{gamma}_doubleq{double_q}_priority{priority}_noisynet{noisyNet}zero_survive_reward")
 
                     logger = CSVLogger(file_name, fieldnames=[
                             "game", "avg_count", "avg_reward","avg_jabuka","vrijeme" ])
 
 
-                    agent1 = snakeAgent2(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, advanced_logging_path=file_name, polyak = polyak )
+                    agent1 = snakeAgent(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, advanced_logging_path=file_name, polyak = polyak )
                     
-                    num_games = 6000
+                    num_games = 10000
                     avg_count = 10
                     avg_reward = 0
                     avg_jabuka = 0
                     for game_no in range(num_games):
-                        if game_no == 350:
-                            agent1.reward_policy = True
                         # Create environment with human render mode
                         env = SimpleSnakeEnv(size = 10)
 
@@ -55,6 +55,9 @@ def main():
                                 action = agent1.get_action((state,snake_state,reward,jabuka,done))
                                 
                             state_novi, snake_state_novi,reward_novi, done_novi, info = env.step(action)
+                            if count == 500:
+                                done_novi = True
+
                             if reward >= 0.5:
                                 jabuka_novi += 1
 
