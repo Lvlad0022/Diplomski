@@ -222,8 +222,9 @@ class DQNnoisy_metadata(nn.Module):
         # --- Convolutional Layers ---
         self.backbone = backbone_model(map_channels=map_channels)
 
+        self.linear = nn.Linear(128 + metadata_dim, 128)
 
-        self.noisy1 = NoisyLinear(128 + metadata_dim, 64)
+        self.noisy1 = NoisyLinear(128, 64)
         self.noisy2 = NoisyLinear(64, 32)
         self.noisy_output = NoisyLinear(32, num_actions)
         
@@ -239,6 +240,8 @@ class DQNnoisy_metadata(nn.Module):
         x = self.backbone(x)
 
         x = torch.cat((x, metadata), dim=1)
+
+        x = self.relu(self.linear(x))
 
         if self.ratios:
             x,ratio1 = self.noisy1(x,self.is_training, self.ratios)
