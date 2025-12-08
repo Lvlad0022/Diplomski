@@ -89,7 +89,7 @@ class snakeAgent_metadata(Agent):
 
     def get_state(self, data):
         data, snake_state, count, reward, jabuka, done = data
-        return {"x": torch.tensor(np.array(data)), "metadata": torch.tensor(np.array([count, jabuka]))}
+        return {"x": torch.tensor(np.array(data)), "metadata": torch.tensor(np.array([count/500, jabuka/50]))}
     
     def memory_to_model(self, memory_state):
         return memory_state
