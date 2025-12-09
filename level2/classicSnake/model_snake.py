@@ -274,7 +274,7 @@ class DQNnoisy_metadata_dueling(nn.Module):
                  map_channels=3, metadata_dim=1,
                  map_height=10, map_width=10, num_actions=4):
 
-        super(DQNnoisy_metadata, self).__init__()
+        super(DQNnoisy_metadata_dueling, self).__init__()
 
         self.is_training = is_training
         self.ratios = False  # keeps your existing ratio system
@@ -288,14 +288,14 @@ class DQNnoisy_metadata_dueling(nn.Module):
         # -------------------------------
         # Dueling: Value stream
         # -------------------------------
-        self.val_fc1 = NoisyLinear(128, 64)
-        self.val_fc2 = NoisyLinear(64, 1)
+        self.val_fc1 = nn.Linear(128, 64)
+        self.val_fc2 = nn.Linear(64, 1)
 
         # -------------------------------
         # Dueling: Advantage stream
         # -------------------------------
-        self.adv_fc1 = NoisyLinear(128, 64)
-        self.adv_fc2 = NoisyLinear(64, num_actions)
+        self.adv_fc1 = NoisyLinear(128, 64, sigma_init=0.02)
+        self.adv_fc2 = NoisyLinear(64, num_actions, sigma_init=0.02)
 
         self.relu = nn.ReLU()
 
@@ -314,12 +314,12 @@ class DQNnoisy_metadata_dueling(nn.Module):
         x = self.relu(self.linear(x))
 
         # === Value stream ===
-        V = self.relu(self.val_fc1(x, self.is_training, self.ratios))
-        V = self.val_fc2(V, self.is_training, self.ratios)  # shape: [B, 1]
+        V = self.relu(self.val_fc1(x, self.is_training, False))
+        V = self.val_fc2(V, self.is_training, False)  # shape: [B, 1]
 
         # === Advantage stream ===
-        A = self.relu(self.adv_fc1(x, self.is_training, self.ratios))
-        A = self.adv_fc2(A, self.is_training, self.ratios)  # shape: [B, num_actions]
+        A = self.relu(self.adv_fc1(x, self.is_training, False))
+        A = self.adv_fc2(A, self.is_training, False)  # shape: [B, num_actions]
 
         # Combine for dueling Q-values:
         # Q(s,a) = V(s) + A(s,a) - mean(A(s,:))
@@ -328,8 +328,13 @@ class DQNnoisy_metadata_dueling(nn.Module):
 
         if self.ratios:
             return Q, None
-        return Q, None  # Adjust return as needed for ratios
+        return Q  # Adjust return as needed for ratios
 
+    def reset_noise(self):
+        """Call this once per environment step (training mode)."""
+        for m in self.modules():
+            if isinstance(m, NoisyLinear):
+                m.reset_noise()
 
 
 def load_backbone_only(model, checkpoint_path, strict=False):

@@ -20,7 +20,7 @@ def main():
             for priority in [True]:
                 for noisyNet in [True]:
                     gamma = 0.99
-                    file_name = make_run_name(f"snakeagent1__polyak{polyak}_gamma{gamma}_doubleq{double_q}_priority{priority}_noisynet{noisyNet}zero_survive_reward")
+                    file_name = make_run_name(f"snakeagent1_metadata_dueling_polyak{polyak}_gamma{gamma}_doubleq{double_q}_priority{priority}_noisynet{noisyNet}zero_survive_reward")
 
                     logger = CSVLogger(file_name, fieldnames=[
                             "game", "avg_count", "avg_reward","avg_jabuka","vrijeme", "lr" ])
@@ -28,7 +28,7 @@ def main():
 
                     agent1 = snakeAgent_metadata(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, polyak = polyak )
                     
-                    num_games = 10000
+                    num_games = 20_000
                     avg_count = 10
                     avg_reward = 0
                     avg_jabuka = 0
@@ -63,8 +63,8 @@ def main():
 
                             agent1.remember((state,snake_state,count,reward,jabuka,done),(state_novi,snake_state_novi,count,reward_novi,jabuka_novi,done_novi))
 
-                            
-                            agent1.train(fill=10_000)
+                            if(game_no > 3000 or (game_no < 1500 and count%10== 0) or (game_no < 3000 and count%5== 0)  ):
+                                agent1.train(fill=20_000)
                             
                             reward_novi,done_novi = agent1.give_reward((state_novi, snake_state, count, reward_novi,jabuka_novi, done_novi),(state, snake_state, count, reward, jabuka,done),action)
                             
@@ -83,7 +83,7 @@ def main():
                         avg_count = 0.99*avg_count + 0.01*count
                         avg_reward = 0.99*avg_reward + 0.01*sum_reward/count
                         avg_jabuka = 0.99*avg_jabuka + 0.01*jabuka
-                        print(game_no, count,  avg_count, sum_reward/count, avg_reward, jabuka, avg_jabuka) 
+                        print(game_no, count,  avg_count, sum_reward/count, avg_reward, jabuka, avg_jabuka, agent1.trainer.scheduler.get_lr()) 
                         vrijeme= time.time()  - a
                         logger.log({
                                 "game": game_no,
@@ -91,7 +91,7 @@ def main():
                                 "avg_reward": avg_reward,
                                 "avg_jabuka": avg_jabuka,
                                 "vrijeme": vrijeme
-                                ,"lr": agent1.scheduler.get_lr()
+                                ,"lr": agent1.trainer.scheduler.get_lr()
                             })
 
 if __name__ == "__main__":

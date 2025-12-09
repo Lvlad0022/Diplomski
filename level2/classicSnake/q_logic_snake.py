@@ -63,14 +63,14 @@ class snakeAgent_metadata(Agent):
         optimizer = optim.Adam(model.parameters(),lr=5e-4)
         scheduler = CosineAnealSchedulerWarmReset(optimizer,  final_lr=5e-7, reset_multiplier=0.5, decay_step_multiplier=1.5)
 
-        memory = ReplayBuffer(capacity=500_000)
+        memory = ReplayBuffer(capacity=1_000_000)
         if priority:
             memory = TDPriorityReplayBuffer()
 
         possible_actions = [0,1,2,3]
                 
         super().__init__(model = model, polyak_update=polyak, gamma = gamma, optimizer = optimizer, scheduler=scheduler, advanced_logging_path= advanced_logging_path,possible_actions =possible_actions,
-                         criterion= huberLoss(), train = train, n_step_remember=n_step_remember, memory=memory, batch_size=512, double_q = double_q, noisy_net=noisy_net)  # pozove konstruktor od Agent
+                         criterion= huberLoss(), train = train, n_step_remember=n_step_remember, memory=memory, batch_size=2048, double_q = double_q, noisy_net=noisy_net)  # pozove konstruktor od Agent
         
 
     def give_reward(self, data_novi, data, akcija):

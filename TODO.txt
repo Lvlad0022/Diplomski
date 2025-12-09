@@ -2,7 +2,7 @@ možda i druge optimizator RMSProp, Adam i AdamW
 
 probati kako uci s huber lossom - to na acrobotu 
 
-implementirati dueling za snake
+implementirati dueling za snake!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
 
 probati ucitati slojeve na kojima dobro radi iz predtreniranih modela 
 i onda samo u prvom conv layeru staviti sve vrijednosti u 4 kanalu na nulu 
@@ -14,3 +14,11 @@ i onda samo u prvom conv layeru staviti sve vrijednosti u 4 kanalu na nulu
 
 iz nekog razloga kada je ratios True u get action i is_training=True i noisy=True, dobijemo lose rezultate, kada ratios = False dobijemo dorbre
 ovo treba istraziti neda mi se vise
+
+
+
+
+
+
+
+PPO implementirati
