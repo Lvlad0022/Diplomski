@@ -269,6 +269,66 @@ class DQNnoisy_metadata(nn.Module):
                 m.reset_noise()
 
 
+class DQNnoisy_metadata_dueling(nn.Module):
+    def __init__(self, is_training, 
+                 map_channels=3, metadata_dim=1,
+                 map_height=10, map_width=10, num_actions=4):
+
+        super(DQNnoisy_metadata, self).__init__()
+
+        self.is_training = is_training
+        self.ratios = False  # keeps your existing ratio system
+
+        # Backbone (unchanged)
+        self.backbone = backbone_model(map_channels=map_channels)
+
+        # Metadata fusion layer
+        self.linear = nn.Linear(128 + metadata_dim, 128)
+
+        # -------------------------------
+        # Dueling: Value stream
+        # -------------------------------
+        self.val_fc1 = NoisyLinear(128, 64)
+        self.val_fc2 = NoisyLinear(64, 1)
+
+        # -------------------------------
+        # Dueling: Advantage stream
+        # -------------------------------
+        self.adv_fc1 = NoisyLinear(128, 64)
+        self.adv_fc2 = NoisyLinear(64, num_actions)
+
+        self.relu = nn.ReLU()
+
+    def forward(self, x, metadata):
+
+        if len(x.shape) == 3:
+            x = x.unsqueeze(0)
+        if len(metadata.shape) == 1:
+            metadata = metadata.unsqueeze(0)
+
+        # Extract features
+        x = self.backbone(x)
+
+        # Add metadata
+        x = torch.cat((x, metadata), dim=1)
+        x = self.relu(self.linear(x))
+
+        # === Value stream ===
+        V = self.relu(self.val_fc1(x, self.is_training, self.ratios))
+        V = self.val_fc2(V, self.is_training, self.ratios)  # shape: [B, 1]
+
+        # === Advantage stream ===
+        A = self.relu(self.adv_fc1(x, self.is_training, self.ratios))
+        A = self.adv_fc2(A, self.is_training, self.ratios)  # shape: [B, num_actions]
+
+        # Combine for dueling Q-values:
+        # Q(s,a) = V(s) + A(s,a) - mean(A(s,:))
+        A_mean = A.mean(dim=1, keepdim=True)
+        Q = V + (A - A_mean)
+
+        if self.ratios:
+            return Q, None
+        return Q, None  # Adjust return as needed for ratios
 
 
 

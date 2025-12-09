@@ -23,7 +23,7 @@ def main():
                     file_name = make_run_name(f"snakeagent1__polyak{polyak}_gamma{gamma}_doubleq{double_q}_priority{priority}_noisynet{noisyNet}zero_survive_reward")
 
                     logger = CSVLogger(file_name, fieldnames=[
-                            "game", "avg_count", "avg_reward","avg_jabuka","vrijeme" ])
+                            "game", "avg_count", "avg_reward","avg_jabuka","vrijeme", "lr" ])
 
 
                     agent1 = snakeAgent_metadata(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, polyak = polyak )
@@ -64,7 +64,7 @@ def main():
                             agent1.remember((state,snake_state,count,reward,jabuka,done),(state_novi,snake_state_novi,count,reward_novi,jabuka_novi,done_novi))
 
                             
-                            agent1.train()
+                            agent1.train(fill=10_000)
                             
                             reward_novi,done_novi = agent1.give_reward((state_novi, snake_state, count, reward_novi,jabuka_novi, done_novi),(state, snake_state, count, reward, jabuka,done),action)
                             
@@ -91,6 +91,7 @@ def main():
                                 "avg_reward": avg_reward,
                                 "avg_jabuka": avg_jabuka,
                                 "vrijeme": vrijeme
+                                ,"lr": agent1.scheduler.get_lr()
                             })
 
 if __name__ == "__main__":
