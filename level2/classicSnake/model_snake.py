@@ -314,8 +314,8 @@ class DQNnoisy_metadata_dueling(nn.Module):
         x = self.relu(self.linear(x))
 
         # === Value stream ===
-        V = self.relu(self.val_fc1(x, self.is_training, False))
-        V = self.val_fc2(V, self.is_training, False)  # shape: [B, 1]
+        V = self.relu(self.val_fc1(x))
+        V = self.val_fc2(V)  # shape: [B, 1]
 
         # === Advantage stream ===
         A = self.relu(self.adv_fc1(x, self.is_training, False))

@@ -63,8 +63,7 @@ def main():
 
                             agent1.remember((state,snake_state,count,reward,jabuka,done),(state_novi,snake_state_novi,count,reward_novi,jabuka_novi,done_novi))
 
-                            if(game_no > 3000 or (game_no < 1500 and count%10== 0) or (game_no < 3000 and count%5== 0)  ):
-                                agent1.train(fill=20_000)
+                            agent1.train(fill=5000)
                             
                             reward_novi,done_novi = agent1.give_reward((state_novi, snake_state, count, reward_novi,jabuka_novi, done_novi),(state, snake_state, count, reward, jabuka,done),action)
                             

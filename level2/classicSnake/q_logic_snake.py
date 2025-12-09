@@ -70,7 +70,7 @@ class snakeAgent_metadata(Agent):
         possible_actions = [0,1,2,3]
                 
         super().__init__(model = model, polyak_update=polyak, gamma = gamma, optimizer = optimizer, scheduler=scheduler, advanced_logging_path= advanced_logging_path,possible_actions =possible_actions,
-                         criterion= huberLoss(), train = train, n_step_remember=n_step_remember, memory=memory, batch_size=2048, double_q = double_q, noisy_net=noisy_net)  # pozove konstruktor od Agent
+                         criterion= huberLoss(), train = train, n_step_remember=n_step_remember, memory=memory, batch_size=256, double_q = double_q, noisy_net=noisy_net)  # pozove konstruktor od Agent
         
 
     def give_reward(self, data_novi, data, akcija):
