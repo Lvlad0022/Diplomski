@@ -58,10 +58,10 @@ class snakeAgent(Agent):
 class snakeAgent_metadata(Agent):
     def __init__(self, train = True,n_step_remember=1,  gamma=0.93, priority = False, memory = 0, advanced_logging_path= False, time_logging_path = False, model = None, double_q = False, polyak = True, noisy_net = False):
         self.reward_policy = True
-        model =DQNnoisy_metadata_dueling(is_training=True, metadata_dim=2) if noisy_net else DQN()
+        model =DQNnoisy(is_training=True) if noisy_net else DQN()
          
         optimizer = optim.Adam(model.parameters(),lr=5e-4)
-        scheduler = CosineAnealSchedulerWarmReset(optimizer,  final_lr=5e-7, reset_multiplier=0.5, decay_step_multiplier=1.5)
+        scheduler = CosineAnealSchedulerWarmReset(optimizer,   final_lr=1e-6, reset_multiplier=0.5, decay_step_multiplier=1.5, decay_steps=150_000)
 
         memory = ReplayBuffer(capacity=1_000_000)
         if priority:

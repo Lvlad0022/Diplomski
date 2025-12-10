@@ -20,13 +20,13 @@ def main():
             for priority in [True]:
                 for noisyNet in [True]:
                     gamma = 0.99
-                    file_name = make_run_name(f"snakeagent1_metadata_dueling_polyak{polyak}_gamma{gamma}_doubleq{double_q}_priority{priority}_noisynet{noisyNet}zero_survive_reward")
+                    file_name = make_run_name(f"snakeagent1_polyak{polyak}_gamma{gamma}_doubleq{double_q}_priority{priority}_noisynet{noisyNet}_nstep_remember3_zero_survive_reward")
 
                     logger = CSVLogger(file_name, fieldnames=[
                             "game", "avg_count", "avg_reward","avg_jabuka","vrijeme", "lr" ])
 
 
-                    agent1 = snakeAgent_metadata(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, polyak = polyak )
+                    agent1 = snakeAgent_metadata(gamma= gamma, n_step_remember=3, noisy_net=noisyNet, double_q=double_q, priority = priority, polyak = polyak )
                     
                     num_games = 20_000
                     avg_count = 10
