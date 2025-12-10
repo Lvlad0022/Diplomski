@@ -1,4 +1,4 @@
-from Diplomski.q_logic.q_logic_pretraining import Pretrainer
+from q_logic.pretraining import Pretrainer
 import pretrain_probelms as pp
 from pretraining_models import MultiHeadModel
 from q_logic_snake import snakeAgent

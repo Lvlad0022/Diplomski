@@ -172,9 +172,9 @@ class Agent:
             self.advanced_logger.remember_log(num_visits, td_error_means,self.n_games)
             
 
-    def train(self, fill=1000): 
+    def train(self):
         
-        if not len(self.memory) < fill :
+        if not len(self.memory) <1000 :
             a = time.time()
             mini_sample, idxs, weights, sample_priorities, log_sample = self.memory.sample(self.batch_size) #sampling from memory
             vrijeme_sample = time.time()-a

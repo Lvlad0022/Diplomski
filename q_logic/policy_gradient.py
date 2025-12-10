@@ -1,59 +1,12 @@
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
-
-class ActorCritic(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_dim=128):
-        super().__init__()
-        # Shared body
-        self.shared = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-        )
-        # Policy head
-        self.policy_head = nn.Linear(hidden_dim, action_dim)
-        # Value head
-        self.value_head = nn.Linear(hidden_dim, 1)
-
-    def forward(self, x):
-        """
-        x: (batch, state_dim)
-        returns:
-           logits: (batch, action_dim)
-           values: (batch, 1)
-        """
-        features = self.shared(x)
-        logits = self.policy_head(features)
-        values = self.value_head(features)
-        return logits, values
-
-    def act(self, state):
-        """
-        state: np.array or 1D tensor, shape (state_dim,)
-        returns: action (int), log_prob (tensor), value (tensor)
-        """
-        if not isinstance(state, torch.Tensor):
-            state = torch.tensor(state, dtype=torch.float32)
-        state = state.unsqueeze(0)  # (1, state_dim)
-
-        logits, value = self.forward(state)
-        dist = Categorical(logits=logits)
-        action = dist.sample()
-        log_prob = dist.log_prob(action)
-        return action.item(), log_prob.squeeze(0), value.squeeze(0)
-    
-
-
 
 class A2CAgent:
     def __init__(
         self,
-        state_dim,
-        action_dim,
+        model, optimizer, possible_actions,
         gamma=0.99,
         lr=3e-4,
         value_coef=0.5,
@@ -67,8 +20,10 @@ class A2CAgent:
         self.entropy_coef = entropy_coef
         self.n_steps = n_steps
 
-        self.model = ActorCritic(state_dim, action_dim).to(self.device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
+        self.model = model.to(self.device)
+        self.optimizer = optimizer
+
+        self.possible_actions = len(possible_actions)
 
     @torch.no_grad()
     def select_action(self, state):

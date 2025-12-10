@@ -125,6 +125,68 @@ class NoisyLinear(nn.Module):
 
 
 
+
+
+class DQNnoisy(nn.Module):
+    def __init__(self,is_training, map_channels=3, map_height=10, map_width=10, num_actions=4):
+        super(DQNnoisy, self).__init__()
+
+        self.is_training = is_training
+        self.ratios = False
+
+        # --- Convolutional Layers ---
+        self.conv_layers = nn.Sequential(
+            nn.Conv2d(map_channels, 32, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+        )
+
+        self.pool = nn.AdaptiveAvgPool2d((1,1))
+
+        # --- Noisy Fully-Connected Layers ---
+        self.noisy_fc1 = NoisyLinear(64, 64)
+        self.noisy_fc2 = NoisyLinear(64, 32)
+
+        # --- Noisy Output Layer ---
+        self.noisy_output = NoisyLinear(32, num_actions)
+
+    def forward(self, x):
+        if len(x.shape) == 3:
+            x = x.unsqueeze(0)
+
+        x = self.conv_layers(x)
+        x = self.pool(x)
+        x = x.view(x.size(0), -1)
+
+        if self.ratios:
+            x, ratio1 = self.noisy_fc1(x,self.is_training, self.ratios)
+            x = F.relu(x)
+            x, ratio2 = self.noisy_fc2(x, self.is_training, self.ratios)
+            x = F.relu(x)
+            x, ratio3 = self.noisy_output(x,self.is_training, self.ratios)
+
+            return x, (ratio1, ratio2, ratio3)
+        
+        x = F.relu(self.noisy_fc1(x,self.is_training, self.ratios))
+        x = F.relu(self.noisy_fc2(x, self.is_training, self.ratios))
+        x = self.noisy_output(x,self.is_training, self.ratios)
+
+        return x
+
+    def reset_noise(self):
+        """Call this once per environment step (training mode)."""
+        for m in self.modules():
+            if isinstance(m, NoisyLinear):
+                m.reset_noise()
+
+
 class backbone_model(nn.Module):
     def __init__(self, map_channels=3, map_height=10, map_width=10, num_actions=4):
         super(backbone_model, self).__init__()
@@ -162,9 +224,9 @@ class backbone_model(nn.Module):
         return self.fc_layer(x)
 
 
-class DQNnoisy(nn.Module):
+class DQNnoisy2(nn.Module):
     def __init__(self,is_training, map_channels=3, map_height=10, map_width=10, num_actions=4):
-        super(DQNnoisy, self).__init__()
+        super(DQNnoisy2, self).__init__()
 
         self.is_training = is_training
         self.ratios = False
@@ -204,131 +266,6 @@ class DQNnoisy(nn.Module):
         x = self.noisy_output(x,self.is_training, self.ratios)
 
         return x
-
-    def reset_noise(self):
-        """Call this once per environment step (training mode)."""
-        for m in self.modules():
-            if isinstance(m, NoisyLinear):
-                m.reset_noise()
-
-
-class DQNnoisy_metadata(nn.Module):
-    def __init__(self,is_training, map_channels=3, metadata_dim = 1,map_height=10, map_width=10, num_actions=4):
-        super(DQNnoisy_metadata, self).__init__()
-
-        self.is_training = is_training
-        self.ratios = False
-
-        # --- Convolutional Layers ---
-        self.backbone = backbone_model(map_channels=map_channels)
-
-        self.linear = nn.Linear(128 + metadata_dim, 128)
-
-        self.noisy1 = NoisyLinear(128, 64)
-        self.noisy2 = NoisyLinear(64, 32)
-        self.noisy_output = NoisyLinear(32, num_actions)
-        
-        # Activation functions
-        self.relu = nn.ReLU()
-
-    def forward(self, x, metadata):
-        if len(x.shape) == 3:
-            x = x.unsqueeze(0)
-        if len(metadata.shape) == 1:
-            metadata = metadata.unsqueeze(0)
-
-        x = self.backbone(x)
-
-        x = torch.cat((x, metadata), dim=1)
-
-        x = self.relu(self.linear(x))
-
-        if self.ratios:
-            x,ratio1 = self.noisy1(x,self.is_training, self.ratios)
-            x = self.relu(x)
-            x, ratio2 = self.noisy2(x,self.is_training, self.ratios)
-            x = self.relu(x)
-            x, ratio3 = self.noisy_output(x,self.is_training, self.ratios)
-
-            return x, (ratio1, ratio2, ratio3)
-        
-        
-        
-        x = self.noisy1(x,self.is_training, self.ratios)
-        x = self.relu(x)
-        x = self.noisy2(x,self.is_training, self.ratios)
-        x = self.relu(x)
-        x = self.noisy_output(x,self.is_training, self.ratios)
-
-        return x
-
-    def reset_noise(self):
-        """Call this once per environment step (training mode)."""
-        for m in self.modules():
-            if isinstance(m, NoisyLinear):
-                m.reset_noise()
-
-
-class DQNnoisy_metadata_dueling(nn.Module):
-    def __init__(self, is_training, 
-                 map_channels=3, metadata_dim=1,
-                 map_height=10, map_width=10, num_actions=4):
-
-        super(DQNnoisy_metadata_dueling, self).__init__()
-
-        self.is_training = is_training
-        self.ratios = False  # keeps your existing ratio system
-
-        # Backbone (unchanged)
-        self.backbone = backbone_model(map_channels=map_channels)
-
-        # Metadata fusion layer
-        self.linear = nn.Linear(128 + metadata_dim, 128)
-
-        # -------------------------------
-        # Dueling: Value stream
-        # -------------------------------
-        self.val_fc1 = nn.Linear(128, 64)
-        self.val_fc2 = nn.Linear(64, 1)
-
-        # -------------------------------
-        # Dueling: Advantage stream
-        # -------------------------------
-        self.adv_fc1 = NoisyLinear(128, 64, sigma_init=0.02)
-        self.adv_fc2 = NoisyLinear(64, num_actions, sigma_init=0.02)
-
-        self.relu = nn.ReLU()
-
-    def forward(self, x, metadata):
-
-        if len(x.shape) == 3:
-            x = x.unsqueeze(0)
-        if len(metadata.shape) == 1:
-            metadata = metadata.unsqueeze(0)
-
-        # Extract features
-        x = self.backbone(x)
-
-        # Add metadata
-        x = torch.cat((x, metadata), dim=1)
-        x = self.relu(self.linear(x))
-
-        # === Value stream ===
-        V = self.relu(self.val_fc1(x))
-        V = self.val_fc2(V)  # shape: [B, 1]
-
-        # === Advantage stream ===
-        A = self.relu(self.adv_fc1(x, self.is_training, False))
-        A = self.adv_fc2(A, self.is_training, False)  # shape: [B, num_actions]
-
-        # Combine for dueling Q-values:
-        # Q(s,a) = V(s) + A(s,a) - mean(A(s,:))
-        A_mean = A.mean(dim=1, keepdim=True)
-        Q = V + (A - A_mean)
-
-        if self.ratios:
-            return Q, None
-        return Q  # Adjust return as needed for ratios
 
     def reset_noise(self):
         """Call this once per environment step (training mode)."""

@@ -106,7 +106,7 @@ class CosineAnealSchedulerWarmReset(CustomLRScheduler):
 
         self.warmup_steps = warmup_steps
         self.peak_steps = peak_steps
-        self.decay_steps = decay_steps + peak_steps + warmup_steps
+        self.decay_steps = decay_steps
         self.reset_multiplier = reset_multiplier
         self.decay_step_multiplier = decay_step_multiplier
 
