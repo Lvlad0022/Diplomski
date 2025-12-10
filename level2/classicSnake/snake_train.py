@@ -26,7 +26,7 @@ def main():
                             "game", "avg_count", "avg_reward","avg_jabuka","vrijeme", "lr" ])
 
 
-                    agent1 = snakeAgent_metadata(gamma= gamma, n_step_remember=3, noisy_net=noisyNet, double_q=double_q, priority = priority, polyak = polyak )
+                    agent1 = snakeAgent(gamma= gamma, n_step_remember=3, noisy_net=noisyNet, double_q=double_q, priority = priority, polyak = polyak )
                     
                     num_games = 20_000
                     avg_count = 10

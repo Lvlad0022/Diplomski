@@ -12,7 +12,7 @@ from q_logic.q_logic_schedulers import LinearDecayScheduler, CosineAnealSchedule
 
 
 class snakeAgent(Agent):
-    def __init__(self, train = True,n_step_remember=3,  gamma=0.93, priority = False, memory = 0, advanced_logging_path= False, time_logging_path = False, model = None, double_q = False, polyak = True, noisy_net = False):
+    def __init__(self, train = True,n_step_remember=1,  gamma=0.93, priority = False, memory = 0, advanced_logging_path= False, time_logging_path = False, model = None, double_q = False, polyak = True, noisy_net = False):
         self.reward_policy = True
         model =DQNnoisy(is_training=True) if noisy_net else DQN()
          
