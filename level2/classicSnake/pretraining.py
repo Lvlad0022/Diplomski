@@ -35,6 +35,8 @@ def main():
     avg_loss = 1
     avg_lossevi = np.ones((pretrainer.num_problems,))
 
+    test_mode = False
+
     for game_no in range(num_games):
         env = SimpleSnakeEnv(size = 10)
 

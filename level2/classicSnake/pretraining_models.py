@@ -16,7 +16,7 @@ class Head(nn.Module):
     
 
 class backbone_model(nn.Module):
-    def __init__(self, map_channels=3, map_height=10, map_width=10, num_actions=4):
+    def __init__(self, map_channels=3):
         super(backbone_model, self).__init__()
 
         # --- Convolutional Layers ---

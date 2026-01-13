@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "snake",
+			"path": "../../.."
+		},
+		{
+			"name": "model_saves",
+			"path": "../../../../model_saves"
+		}
+	],
+	"settings": {}
+}

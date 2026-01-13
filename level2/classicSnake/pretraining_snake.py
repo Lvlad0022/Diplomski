@@ -1,4 +1,4 @@
-from q_logic.pretraining import Pretrainer
+from Diplomski.q_logic.q_logic_pretraining import Pretrainer
 import pretrain_probelms as pp
 from pretraining_models import MultiHeadModel
 from q_logic_snake import snakeAgent
@@ -63,12 +63,7 @@ class snake_pretrainer(Pretrainer):
 
     def get_state(self, data):
         data,snake_state, reward, jabuka, done = data
-        tenzor = np.zeros((4,data.shape[1],data.shape[2]))
-        tenzor[:3,:,:] = data
-        n = len(snake_state)-1
-        for i, (x,y) in enumerate(snake_state[1:]):
-            tenzor[3,x,y] = (n-i)/100
-        return {"x": torch.tensor(tenzor, dtype=torch.float32)}
+        return {"x": torch.tensor(data, dtype=torch.float32)}
     
     def memory_to_model(self, memory_state):
         return memory_state
@@ -76,5 +71,31 @@ class snake_pretrainer(Pretrainer):
     def get_memory_state(self, data):
         return self.get_state(data)
     
+
+
+class snake_pretrainer_head_position(snake_pretrainer):
+    def __init__(self):
+        super().__init__()
+
+    def get_state(self, data):
+        data,snake_state, reward, jabuka, done = data
+        tenzor = np.zeros((4,data.shape[1],data.shape[2]))
+        tenzor[:3,:,:] = data
+        x,y = snake_state[0]
+        tenzor[3,x,y] = 1 # head
+        return {"x": torch.tensor(tenzor, dtype=torch.float32)}
     
-        
+class snake_pretrainer_head_tail(snake_pretrainer):
+    def __init__(self):
+        super().__init__()
+
+    def get_state(self, data):
+        data,snake_state, reward, jabuka, done = data
+        tenzor = np.zeros((5,data.shape[1],data.shape[2]))
+        tenzor[:3,:,:] = data
+        x,y = snake_state[0]
+        tenzor[3,x,y] = 1 # head
+        x,y = snake_state[-1]
+        tenzor[4,x,y] = 1 # tail
+        return {"x": torch.tensor(tenzor, dtype=torch.float32)}
+    

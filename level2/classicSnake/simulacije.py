@@ -9,7 +9,8 @@ def main():
     agent1 = snakeAgent(train= True, noisy_net= True)
     
     
-    agent1.load_agent_state(r"C:\Users\lovro\Desktop\snake\model_saves\snakeagent1__polyakTrue_gamma0.99_doubleqTrue_priorityTrue_noisynetTruezero_survive_reward_2025-12-05_17-13-00.pt.pt", noisynet=True, training=True)
+    agent1.load_agent_state(r"C:\Users\lovro\Desktop\snake\model_saves\snakeagent1__polyakTrue_gamma0.99_doubleqTrue_priorityTrue_noisynetTruezero_survive_reward_2026-01-12_19-05-00.pt.pt", noisynet=True, training=False)
+    
     
     sum_jabuke = 0
     for i in range(100):
@@ -35,9 +36,6 @@ def main():
             #time.sleep(0.03)
         print(jabuke)
         #time.sleep(2)
-
-    print("asdsa")
-    print(sum_jabuke/100)
 
 if __name__ == "__main__":
     main()

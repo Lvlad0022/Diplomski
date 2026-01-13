@@ -1,4 +1,4 @@
-from q_logic_snake import snakeAgent, snakeAgent2
+from q_logic_snake import snakeAgent, snakeAgent_head
 from q_logic.q_logic_logging import make_run_name, CSVLogger
 import os
 import random
@@ -15,20 +15,22 @@ import time
 
 def main():
     polyak = True
-    for i in [1,2,3,4]:
+    for i in [0,1]:
         for double_q in [True]:
             for priority in [True]:
                 for noisyNet in [True]:
                     gamma = 0.99
-                    file_name = make_run_name(f"snakeagent1__polyak{polyak}_gamma{gamma}_doubleq{double_q}_priority{priority}_noisynet{noisyNet}zero_survive_reward")
+                    file_name = make_run_name(f"snakeagent1__polyak{polyak}_gamma{gamma}_doubleq{double_q}_priority{priority}_noisynet{noisyNet}zero_survive_reward_ver{i}")
 
                     logger = CSVLogger(file_name, fieldnames=[
                             "game", "avg_count", "avg_reward","avg_jabuka","vrijeme" ])
 
+                    if i == 0:
+                        agent1 = snakeAgent(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, advanced_logging_path=file_name, polyak = polyak )
+                    if i == 1:
+                        agent1 = snakeAgent_head(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, advanced_logging_path=file_name, polyak = polyak )
 
-                    agent1 = snakeAgent(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, advanced_logging_path=file_name, polyak = polyak )
-                    
-                    num_games = 10000
+                    num_games = 6000
                     avg_count = 10
                     avg_reward = 0
                     avg_jabuka = 0
@@ -75,8 +77,6 @@ def main():
 
 
                             sum_reward += reward
-                            # optional slowdown for visibility
-                            #time.sleep(0.01
                         if(game_no%1000 == 0):
                             agent1.save_agent_state(f"{file_name}.pt")
                         

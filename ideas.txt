@@ -1,3 +1,0 @@
-mislim da kod td replaya se stvara problem kod duljih partija što se tada replayaju domnantno nova iskustva
-često se desi da nakon duge partije uslijedi nekoliko kratkih i tako u krug, kao da lako zaboravlja ono što je prije naučio
-poprilično sam siguran da je to posljedica prevelikog lr 
