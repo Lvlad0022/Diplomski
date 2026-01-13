@@ -15,7 +15,7 @@ import time
 
 def main():
     polyak = True
-    for i in [0,1]:
+    for i in [1]:
         for double_q in [True]:
             for priority in [True]:
                 for noisyNet in [True]:

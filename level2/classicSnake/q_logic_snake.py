@@ -72,7 +72,7 @@ class snakeAgent_head(snakeAgent):
         x,y = snake_state[0]
         out[:3,:,:] = a
         out[3,x,y] = 1 # head
-        return {"x": torch.tensor(np.array(data))}
+        return {"x": torch.tensor(np.array(out, dtype= np.float32))}
     
 
     
