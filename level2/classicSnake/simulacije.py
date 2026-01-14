@@ -2,14 +2,18 @@ from environment import SimpleSnakeEnv
 import time
 import random
 from q_logic_snake import snakeAgent
+from pathlib import Path
+
 
 def main():
     # Create environment with human render mode
     env = SimpleSnakeEnv(size = 10)
     agent1 = snakeAgent(train= True, noisy_net= True)
     
-    
-    agent1.load_agent_state(r"C:\Users\lovro\Desktop\snake\Diplomski\level2\classicSnake\model_saves\snakeagent1__polyakTrue_gamma0.99_doubleqTrue_priorityTrue_noisynetTruezero_survive_reward_ver0_2026-01-13_13-12-24.pt.pt", noisynet=True, training=False)
+    current_dir = Path(__file__).parent
+    file_name = "snakeagent1__polyakTrue_gamma0.99_doubleqTrue_priorityTrue_noisynetTruezero_survive_reward_ver0_2026-01-13_13-12-24.pt.pt"
+    model_path = current_dir/ "representative_models" / file_name
+    agent1.load_agent_state(model_path, noisynet=True, training=False)
     
     
     sum_jabuke = 0

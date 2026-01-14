@@ -41,7 +41,7 @@ def main():
                     #                         noisynet=True, training=True)
 
 
-                    agent1 = snakeAgent(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, advanced_logging_path=file_name, polyak = polyak, residual=True )
+                    agent1 = snakeAgent(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, advanced_logging_path=file_name, polyak = polyak, residual=False )
                     
                     num_games = 6000
                     avg_count = 10

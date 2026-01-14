@@ -163,6 +163,46 @@ class backbone_model(nn.Module):
         return self.fc_layer(x)
 
 
+
+class ImprovedOriginalBackbone(nn.Module):
+    """Improved version of your original (non-residual) backbone"""
+    def __init__(self, map_channels=3):
+        super().__init__()
+        
+        self.conv_layers = nn.Sequential(
+            # Layer 1
+            nn.Conv2d(map_channels, 32, 3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(32),
+            
+            # Layer 2  
+            nn.Conv2d(32, 64, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),  # 10x10 → 5x5
+            
+            # Layer 3
+            nn.Conv2d(64, 64, 3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(64),
+            
+            # Layer 4
+            nn.Conv2d(64, 128, 3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2),  # 5x5 → 3x3
+            
+            # Layer 5
+            nn.Conv2d(128, 128, 3, padding=1),
+            nn.ReLU(),
+        )
+        
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+    
+    def forward(self, x):
+        x = self.conv_layers(x)
+        x = self.pool(x)
+        return x.view(x.size(0), -1)
+
+
 class DQNnoisy(nn.Module):
     def __init__(self,is_training, map_channels=3, map_height=10, map_width=10, num_actions=4):
         super(DQNnoisy, self).__init__()
@@ -287,8 +327,9 @@ class backbone_residual_model(nn.Module):
         # --- Convolutional Layers ---
         self.conv_layers = nn.Sequential(
             ResidualBlock(map_channels,32),
-            ResidualBlock(32,64),
-            ResidualBlock(64,128)
+            ResidualBlock(32,64, ),
+            ResidualBlock(64,64,True), #dodan
+            ResidualBlock(64,128),
         )
 
         self.pool = nn.AdaptiveAvgPool2d((1,1))
@@ -388,3 +429,173 @@ def load_backbone_only(model, checkpoint_path, strict=False):
 def costum_model_load(model, state_dict, n_layers):
     first_conv_name = None
     
+
+####################################################################33 attention
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class ChannelAttention(nn.Module):
+    """Squeeze-and-Excitation (SE) Block"""
+    def __init__(self, channels, reduction=16):
+        super().__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        
+        self.fc = nn.Sequential(
+            nn.Linear(channels, channels // reduction, bias=False),
+            nn.ReLU(),
+            nn.Linear(channels // reduction, channels, bias=False),
+        )
+        
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        
+        # Both avg and max pooling
+        avg_out = self.fc(self.avg_pool(x).view(b, c))
+        max_out = self.fc(self.max_pool(x).view(b, c))
+        
+        # Combine
+        out = nn.Sigmoid(avg_out + max_out)
+        out = out.view(b, c, 1, 1)
+        
+        return x * out
+
+class SpatialAttention(nn.Module):
+    """Spatial Attention Block"""
+    def __init__(self, kernel_size=3):
+        super().__init__()
+        padding = kernel_size // 2
+        
+        self.conv = nn.Conv2d(2, 1, kernel_size, padding=padding, bias=False)
+        self.sigmoid = nn.Sigmoid()
+        
+    def forward(self, x):
+        # Compute channel-wise mean and max
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        
+        # Concatenate and convolve
+        out = torch.cat([avg_out, max_out], dim=1)
+        out = self.conv(out)
+        out = self.sigmoid(out)
+        
+        return x * out
+
+class CBAMBlock(nn.Module):
+    """Convolutional Block Attention Module (CBAM)"""
+    def __init__(self, channels, reduction=16, kernel_size=7):
+        super().__init__()
+        self.channel_attention = ChannelAttention(channels, reduction)
+        self.spatial_attention = SpatialAttention(kernel_size)
+        
+    def forward(self, x):
+        x = self.channel_attention(x)
+        x = self.spatial_attention(x)
+        return x
+
+class backbone_model_with_attention(nn.Module):
+    def __init__(self, map_channels=3):
+        super().__init__()
+
+        # --- Convolutional Layers with Attention ---
+        self.conv1 = nn.Conv2d(map_channels, 32, kernel_size=3, padding=1)
+        self.attn1 = CBAMBlock(32)
+        self.pool1 = nn.MaxPool2d(2)
+        
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.attn2 = CBAMBlock(64)
+        self.pool2 = nn.MaxPool2d(2)
+        
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        self.attn3 = CBAMBlock(128)
+        self.pool3 = nn.MaxPool2d(2)
+        
+        self.conv4 = nn.Conv2d(128, 128, kernel_size=3, padding=1)
+        self.attn4 = CBAMBlock(128)
+        
+        self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
+
+    def forward(self, x):
+        if len(x.shape) == 3:
+            x = x.unsqueeze(0)
+        
+        # Block 1
+        x = self.conv1(x)
+        x = self.attn1(x)  # Apply attention
+        x = F.relu(x)
+        x = self.pool1(x)
+        
+        # Block 2
+        x = self.conv2(x)
+        x = self.attn2(x)  # Apply attention
+        x = F.relu(x)
+        x = self.pool2(x)
+        
+        # Block 3
+        x = self.conv3(x)
+        x = self.attn3(x)  # Apply attention
+        x = F.relu(x)
+        x = self.pool3(x)
+        
+        # Block 4
+        x = self.conv4(x)
+        x = self.attn4(x)  # Apply attention
+        x = F.relu(x)
+        
+        x = self.global_pool(x)
+        x = x.view(x.size(0), -1)
+        
+        return x
+    
+
+class DQNnoisy(nn.Module):
+    def __init__(self,is_training, map_channels=3, map_height=10, map_width=10, num_actions=4):
+        super(DQNnoisy, self).__init__()
+
+        self.is_training = is_training
+        self.ratios = False
+
+        # --- Convolutional Layers ---
+        self.backbone = backbone_model(map_channels=map_channels)
+
+
+        self.noisy1 = NoisyLinear(128, 64)
+        self.noisy2 = NoisyLinear(64, 32)
+        self.noisy_output = NoisyLinear(32, num_actions)
+        
+        # Activation functions
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        if len(x.shape) == 3:
+            x = x.unsqueeze(0)
+
+        x = self.backbone(x)
+
+        if self.ratios:
+            x,ratio1 = self.noisy1(x,self.is_training, self.ratios)
+            x = self.relu(x)
+            x, ratio2 = self.noisy2(x,self.is_training, self.ratios)
+            x = self.relu(x)
+            x, ratio3 = self.noisy_output(x,self.is_training, self.ratios)
+
+            return x, (ratio1, ratio2, ratio3)
+        
+        
+        
+        x = self.noisy1(x,self.is_training, self.ratios)
+        x = self.relu(x)
+        x = self.noisy2(x,self.is_training, self.ratios)
+        x = self.relu(x)
+        x = self.noisy_output(x,self.is_training, self.ratios)
+
+        return x
+
+    def reset_noise(self):
+        """Call this once per environment step (training mode)."""
+        for m in self.modules():
+            if isinstance(m, NoisyLinear):
+                m.reset_noise()
