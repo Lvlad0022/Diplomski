@@ -553,16 +553,16 @@ class backbone_model_with_attention(nn.Module):
         return x
     
 
-class DQNnoisy(nn.Module):
-    def __init__(self,is_training, map_channels=3, map_height=10, map_width=10, num_actions=4):
+class DQNnoisy_attention(nn.Module):
+    def __init__(self,is_training, map_channels=3, map_height=10, map_width=10, num_actions=4, dropout_rate = 0):
         super(DQNnoisy, self).__init__()
 
         self.is_training = is_training
         self.ratios = False
 
         # --- Convolutional Layers ---
-        self.backbone = backbone_model(map_channels=map_channels)
-
+        self.dropout1 = nn.Dropout(dropout_rate)
+        self.dropout2 = nn.Dropout(dropout_rate)
 
         self.noisy1 = NoisyLinear(128, 64)
         self.noisy2 = NoisyLinear(64, 32)
@@ -577,9 +577,16 @@ class DQNnoisy(nn.Module):
 
         x = self.backbone(x)
 
+        if self.training:
+            x = self.dropout1(x)
+
         if self.ratios:
             x,ratio1 = self.noisy1(x,self.is_training, self.ratios)
             x = self.relu(x)
+
+            if self.training:
+                x = self.dropout2(x)
+
             x, ratio2 = self.noisy2(x,self.is_training, self.ratios)
             x = self.relu(x)
             x, ratio3 = self.noisy_output(x,self.is_training, self.ratios)
@@ -590,6 +597,10 @@ class DQNnoisy(nn.Module):
         
         x = self.noisy1(x,self.is_training, self.ratios)
         x = self.relu(x)
+
+        if self.training:
+            x = self.dropout2(x)
+
         x = self.noisy2(x,self.is_training, self.ratios)
         x = self.relu(x)
         x = self.noisy_output(x,self.is_training, self.ratios)
