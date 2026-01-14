@@ -288,8 +288,7 @@ class backbone_residual_model(nn.Module):
         self.conv_layers = nn.Sequential(
             ResidualBlock(map_channels,32),
             ResidualBlock(32,64),
-            ResidualBlock(64,128),
-            ResidualBlock(128,128,True)
+            ResidualBlock(64,128)
         )
 
         self.pool = nn.AdaptiveAvgPool2d((1,1))
