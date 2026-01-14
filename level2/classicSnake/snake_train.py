@@ -13,23 +13,36 @@ from environment import SimpleSnakeEnv
 import time
 
 
+def remembrance(count):
+    return (0.2+ 0.8*count/200  > random.random())
+
+
+
 def main():
     polyak = True
-    for i in [1]:
+    for i in [0]:
         for double_q in [True]:
             for priority in [True]:
                 for noisyNet in [True]:
                     gamma = 0.99
-                    file_name = make_run_name(f"snakeagent1__polyak{polyak}_gamma{gamma}_doubleq{double_q}_priority{priority}_noisynet{noisyNet}zero_survive_reward_ver{i}")
+                    file_name = make_run_name(f"snakeagent1_residual_polyak{polyak}_gamma{gamma}_doubleq{double_q}_priority{priority}_noisynet{noisyNet}zero_survive_reward_ver{i}")
 
                     logger = CSVLogger(file_name, fieldnames=[
                             "game", "avg_count", "avg_reward","avg_jabuka","vrijeme" ])
 
-                    if i == 0:
-                        agent1 = snakeAgent(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, advanced_logging_path=file_name, polyak = polyak )
-                    if i == 1:
-                        agent1 = snakeAgent_head(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, advanced_logging_path=file_name, polyak = polyak )
 
+                    # if i == 0:
+                    #     agent1 = snakeAgent(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, advanced_logging_path=file_name, polyak = polyak )
+                    # if i == 1:
+                    #     agent1 = snakeAgent_head(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, advanced_logging_path=file_name, polyak = polyak )
+                  
+
+                    # agent1.load_agent_state(r"C:\Users\lovro\Desktop\snake\Diplomski\level2\classicSnake\model_saves\snakeagent1__polyakTrue_gamma0.99_doubleqTrue_priorityTrue_noisynetTruezero_survive_reward_ver0_2026-01-13_13-12-24.pt.pt", 
+                    #                         noisynet=True, training=True)
+
+
+                    agent1 = snakeAgent(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, advanced_logging_path=file_name, polyak = polyak, residual=True )
+                    
                     num_games = 6000
                     avg_count = 10
                     avg_reward = 0
@@ -63,7 +76,8 @@ def main():
                             if reward >= 0.5:
                                 jabuka_novi += 1
 
-                            agent1.remember((state,snake_state,reward,jabuka,done),(state_novi,snake_state_novi,reward_novi,jabuka_novi,done_novi))
+                            if remembrance(count) or True:
+                                agent1.remember((state,snake_state,reward,jabuka,done),(state_novi,snake_state_novi,reward_novi,jabuka_novi,done_novi))
 
                             
                             agent1.train()
@@ -83,8 +97,10 @@ def main():
                         avg_count = 0.99*avg_count + 0.01*count
                         avg_reward = 0.99*avg_reward + 0.01*sum_reward/count
                         avg_jabuka = 0.99*avg_jabuka + 0.01*jabuka
-                        print(game_no, count,  avg_count, sum_reward/count, avg_reward, jabuka, avg_jabuka) 
+                        form = '{:.4f}'
+                        print(form.format(game_no), form.format(count),  form.format(avg_count), form.format(sum_reward/count), form.format(avg_reward), form.format(jabuka), form.format(avg_jabuka)) 
                         vrijeme= time.time()  - a
+                        
                         logger.log({
                                 "game": game_no,
                                 "avg_count": avg_count,

@@ -104,10 +104,14 @@ class CosineAnealSchedulerWarmReset(CustomLRScheduler):
     def __init__(self, optimizer, warmup_steps = 2500, peak_steps = 2000,decay_steps = 100_000, initial_lr = 1e-4, max_lr = 5e-4, reset_multiplier = 0.5, decay_step_multiplier = 1.3, final_lr = 1e-6):
         super().__init__(optimizer, initial_lr, final_lr, max_lr)
 
+        """
+        schduler which every decay_steps number of steps gets reset to max_lr, but max_lr also decays
+        """
+
         self.warmup_steps = warmup_steps
         self.peak_steps = peak_steps
-        self.decay_steps = decay_steps
-        self.reset_multiplier = reset_multiplier
+        self.decay_steps = decay_steps #steps untill it resets
+        self.reset_multiplier = reset_multiplier # after reset max_lr gets multiplied by this
         self.decay_step_multiplier = decay_step_multiplier
 
         self.final_lr = final_lr
@@ -138,92 +142,3 @@ class CosineAnealSchedulerWarmReset(CustomLRScheduler):
 
         self.set_lr(lr)
 
-
-
-class TDAdaptiveScheduler(CustomLRScheduler):
-    def __init__(self, optimizer, initial_lr = 1e-4, min_lr = 5e-6, max_lr = 5e-4,
-                 low_err=0.1, high_err=1.0, up_factor=1.05, down_factor=0.995):
-        super().__init__(optimizer, initial_lr, min_lr, max_lr)
-        self.low_err = low_err
-        self.high_err = high_err
-        self.up_factor = up_factor
-        self.down_factor = down_factor
-
-    def step(self, td_error):
-        td = abs(td_error)
-
-        if td > self.high_err:
-            lr = self.current_lr * self.up_factor
-        elif td < self.low_err:
-            lr = self.current_lr * self.down_factor
-        else:
-            lr = self.current_lr  # stable region
-
-        self.set_lr(lr)
-
-
-
-class LossAdaptiveLRScheduler(CustomLRScheduler):
-    def __init__(self,
-                optimizer,
-                initial_lr=1e-4,
-                min_lr=1e-6,
-                max_lr=5e-4,
-                ema_alpha=0.05,            
-                up_threshold=0.98,         
-                down_threshold=1.02,       
-                lr_up_factor=1.02,         
-                lr_down_factor=0.98,   
-                update_duration = 100,
-                decay_rate = 0.00003
-
-            ):
-        super().__init__(optimizer, initial_lr, min_lr, max_lr)
-
-        # EMA tracking
-        self.ema_loss = None
-        self.alpha = ema_alpha
-
-        # thresholds & scale factors
-        self.up_threshold = up_threshold
-        self.down_threshold = down_threshold
-        self.lr_up_factor = lr_up_factor
-        self.lr_down_factor = lr_down_factor
-
-        self.last_ema = None
-        self.update_counter = 0
-        self.update_duration = update_duration
-
-        self.decay_rate = decay_rate
-
-
-    def step(self, loss_value):
-        """Update LR based on loss trend + optional cooldown."""
-        
-        # Initialize EMA on first call
-        if self.ema_loss is None:
-            self.last_ema = loss_value
-            self.ema_loss = loss_value
-            return self.current_lr
-
-        self.ema_loss = (1 - self.alpha) * self.ema_loss + self.alpha * loss_value
-
-        new_lr = self.current_lr * (1-self.decay_rate)
-        if(self.update_counter % self.update_duration == 0):
-            ratio = self.ema_loss / self.last_ema 
-            # Loss spike → reduce lr sharply
-            if ratio > self.down_threshold:
-                new_lr = self.current_lr * self.lr_down_factor
-
-            # Loss stagnant → gently increase lr
-            elif ratio > self.up_threshold:
-                new_lr = self.current_lr * self.lr_up_factor
-
-            self.update_counter =0
-            self.last_ema = self.ema_loss
-        
-        self.update_counter += 1
-        # Apply to optimizer
-        self.set_lr(new_lr)
-
-        return self.current_lr

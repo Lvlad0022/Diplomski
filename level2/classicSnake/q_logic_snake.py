@@ -4,7 +4,7 @@ import numpy as np
 from q_logic.q_logic import Agent
 from math import cos
 
-from model_snake import DQN, DQNnoisy, load_backbone_only, costum_model_load
+from model_snake import DQN, DQNnoisy, DQNnoisy_residual_backbone, load_backbone_only, costum_model_load
 from q_logic.loss_functions import huberLoss
 from q_logic.q_logic_memory_classes import TDPriorityReplayBuffer, ReplayBuffer
 from q_logic.q_logic_schedulers import LinearDecayScheduler, CosineAnealSchedulerWarmReset
@@ -12,15 +12,21 @@ from q_logic.q_logic_schedulers import LinearDecayScheduler, CosineAnealSchedule
 
 
 class snakeAgent(Agent):
-    def __init__(self, train = True,n_step_remember=1,  gamma=0.93, priority = False, memory = 0, advanced_logging_path= False, time_logging_path = False, model = None, double_q = False, polyak = True, noisy_net = False):
+    def __init__(self, train = True,n_step_remember=1,  gamma=0.93, priority = False, memory = 0, advanced_logging_path= False,
+                  time_logging_path = False, model = None, double_q = False, polyak = True, noisy_net = False, residual = False
+                  ):
         self.reward_policy = True
         if model is not None:
             model = model
         else:
-            model =DQNnoisy(is_training=True) if noisy_net else DQN()
+            if residual:
+                model = DQNnoisy_residual_backbone(is_training= True)
+            else:
+                model =DQNnoisy(is_training=True) if noisy_net else DQN()
          
-        optimizer = optim.Adam(model.parameters(),lr=5e-4)
-        scheduler = CosineAnealSchedulerWarmReset(optimizer)
+        optimizer = optim.Adam(model.parameters(),lr=1e-6)
+        #scheduler = CosineAnealSchedulerWarmReset(optimizer)
+        scheduler = None
 
         memory = ReplayBuffer()
         if priority:
