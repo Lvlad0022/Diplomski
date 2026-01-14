@@ -256,7 +256,9 @@ class DQNnoisy(nn.Module):
 
 ############################################################################################# RESIDUAL
 
-
+'''
+zakljucak je da residual model nije dobro radio
+'''
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, downsample: bool = False):
