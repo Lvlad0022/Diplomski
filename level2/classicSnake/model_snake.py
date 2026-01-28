@@ -451,6 +451,8 @@ class ChannelAttention(nn.Module):
             nn.ReLU(),
             nn.Linear(channels // reduction, channels, bias=False),
         )
+
+        self.sigmoid = nn.Sigmoid()
         
     def forward(self, x):
         b, c, _, _ = x.size()
@@ -460,7 +462,7 @@ class ChannelAttention(nn.Module):
         max_out = self.fc(self.max_pool(x).view(b, c))
         
         # Combine
-        out = nn.Sigmoid(avg_out + max_out)
+        out = self.sigmoid(avg_out + max_out)
         out = out.view(b, c, 1, 1)
         
         return x * out
@@ -555,10 +557,12 @@ class backbone_model_with_attention(nn.Module):
 
 class DQNnoisy_attention(nn.Module):
     def __init__(self,is_training, map_channels=3, map_height=10, map_width=10, num_actions=4, dropout_rate = 0):
-        super(DQNnoisy, self).__init__()
+        super(DQNnoisy_attention, self).__init__()
 
         self.is_training = is_training
         self.ratios = False
+
+        self.backbone = backbone_model_with_attention()
 
         # --- Convolutional Layers ---
         self.dropout1 = nn.Dropout(dropout_rate)
