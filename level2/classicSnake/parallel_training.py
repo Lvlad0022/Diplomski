@@ -7,6 +7,10 @@ import os, time, random, zmq, multiprocessing as mp, psutil
 from contextlib import closing
 import numpy as np  
 from q_logic.q_logic_memory_classes import ExperienceMemory
+from environment import SimpleSnakeEnv
+from paralell_training_agent import snakeAgent_inference
+from pathlib import Path
+
 
 WORKERS        = 4
 COLLECTOR_PORT = 5555
@@ -15,7 +19,7 @@ MEMORY_PORT    = 5556
 # -------------------------------------------------
 # Memory server - runs in its own process
 # -------------------------------------------------
-def memory_server(capacity=50_000):
+def memory_server(capacity=200_000):
     """Dedicated process hosting the ExperienceMemory."""
     ctx = zmq.Context()
     sock = ctx.socket(zmq.REP)
@@ -35,8 +39,14 @@ def memory_server(capacity=50_000):
                 
             elif cmd == "sample":
                 batch_size, = args
-                batch = memory.sample(batch_size)
+                batch = None
+                if len(memory) > batch_size:
+                    batch = memory.sample(batch_size)
+                    print(type(batch))
+                else:
+                    print(f"cannot sample memory is {len(memory)}")
                 sock.send_pyobj(batch)
+
                 
             elif cmd == "update":
                 idxs, td, priorities = args
@@ -117,11 +127,12 @@ def collector():
         print("[Collector] ready – waiting for workers …")
         done = 0
         while done < WORKERS:
-            wid, game_no, pos = sock.recv_json()
-            if game_no == "DONE":
+            message = sock.recv_pyobj()
+            worker_done, memory = message
+            if worker_done == True:
                 done += 1
                 continue
-            mem_client.push((wid, game_no, pos), 1.0)
+            mem_client.push( memory, 1.0)
         
         print("[Collector] all workers finished")
     
@@ -135,13 +146,18 @@ def trainer():
     print("[Trainer] started")
     mem_client = MemoryClient()
     time.sleep(1.0)
+
+    
     
     for _ in range(10):
         t0 = time.time()
         batch = mem_client.sample(5)
-        elapsed = (time.time() - t0) * 1000
-        print(f"[Trainer] batch-len={len(batch)} sample-time={elapsed:.2f} ms")
-        time.sleep(0.1)
+        if batch is not None:
+            samples, data_idxs, weights, sample_priorities, sample_log = batch
+            print(data_idxs)
+            elapsed = (time.time() - t0) * 1000
+            print(f"[Trainer] batch-len={len(batch)} sample-time={elapsed:.2f} ms")
+        time.sleep(1)
     
     print("[Trainer] finished")
     mem_client.close()
@@ -160,23 +176,54 @@ def worker(wid):
     with closing(ctx.socket(zmq.PUSH)) as sock:
         sock.setsockopt(zmq.LINGER, 0)
         sock.connect(f"tcp://127.0.0.1:{COLLECTOR_PORT}")
+
+        #gamelogic
         time.sleep(0.2)
+        env = SimpleSnakeEnv(size = 10)
+        agent1 = snakeAgent_inference(train= False, noisy_net= True, on_gpu = False)
         
-        t0 = time.time()
-        sent = 0
-        while time.time() - t0 < 5:
-            for _ in range(50):
-                pos = random.randint(-100, 100)
-                sock.send_json((wid, sent, pos))
-                sent += 1
-            time.sleep(1)
-        sock.send_json((wid, "DONE", None))
+        current_dir = Path(__file__).parent
+        file_name = "snakeagent1__polyakTrue_gamma0.99_doubleqTrue_priorityTrue_noisynetTruezero_survive_reward_ver0_2026-01-13_13-12-24.pt.pt"
+        model_path = current_dir/ "representative_models" / file_name
+        agent1.load_model_state(model_path, noisynet=True, training=False)
+
+        sum_jabuke = 0
+
+        for i in range(100):
+            state, snake = env.reset()
+            done = False
+            count = 0
+            jabuka = 0
+            reward = 0
+            jabuka_novi = 0
+            while not done:
+                count +=1
+                # Random action just to view the game
+                if(count <0):
+                    action = random.randint(0,3)
+                else:
+                    action = agent1.get_action((state,snake,reward,jabuka,done))
+
+                if reward >= 0.5:
+                    sum_jabuke += 1
+                    jabuka_novi += 1
+
+                state_novi,snake_state_novi,reward_novi,done_novi, info = env.step(action)
+                memory = agent1.remember((state,snake,reward,jabuka,done),(state_novi,snake_state_novi,reward_novi,jabuka_novi,done_novi))
+
+                state, snake, reward,jabuka,done   =state_novi,snake_state_novi,reward_novi,jabuka_novi,done_novi
+
+                sock.send_pyobj((False, memory))
+            print(f"worker{wid} igra {i} jabuka {jabuka_novi}")
+
+        sock.send_pyobj((True, 1))
 
 
 # -------------------------------------------------
 # Main
 # -------------------------------------------------
 if __name__ == "__main__":
+
     mp.set_start_method("spawn", force=True)
 
     # Start memory server first
@@ -210,3 +257,6 @@ if __name__ == "__main__":
     mem_proc.join(timeout=2)
     
     print(f"\nAll done. Memory size: {final_size}")
+
+
+# jos samo trebam shvatit koji je tocno problem s loadanjem modela u agent_inference

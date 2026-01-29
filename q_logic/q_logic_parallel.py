@@ -35,9 +35,9 @@ class Agent_inference:
     you can also use several choices for models such as noisy net, dueling net, QR-DQN...
 
     to use the class you need to define a knew subclass with functions as per specifications stated in the example 
-    """
-    def __init__(self, model,  possible_actions ,batch_size, train = True, on_gpu = False,
-                 n_step_remember=1, gamma=0.93,memory = ReplayBuffer(), noisy_net = False):
+    """ 
+    def __init__(self, model,  possible_actions , on_gpu = False,
+                 n_step_remember=1, gamma=0.93, train = True, noisy_net = False):
         
         self.on_gpu = on_gpu
         self.possible_actions = possible_actions #a dictionary of possible actions for different problems
@@ -52,10 +52,8 @@ class Agent_inference:
         self.n_games = 0
         self.gamma = gamma
         self.action_counter= 0
-        self.batch_size = batch_size
 
         #memory
-        self.memory = memory 
         self.rewards_average = 0
         self.n_step_remember = n_step_remember
         self.last_action = None
@@ -67,8 +65,6 @@ class Agent_inference:
         self.model = model
         if on_gpu:
             self.model = model.to(DEVICE)
-        if noisy_net:
-            self.model_target.train()
         
 
     def load_model_state(self, file_path='agent_state.pth', training=False, noisynet = False):
@@ -207,9 +203,7 @@ class Agent_trainer:
 
         self.batch_size = batch_size
 
-        #memory
-        self.memory = memory 
-
+        
         #modeli
         self.is_training = train
         self.model = model.to(DEVICE)
@@ -250,11 +244,11 @@ class Agent_trainer:
 
     def return_counter(self):
         return self.counter
-    def train(self):
+    
+    def train(self, mini_sample, idxs, weights, sample_priorities, log_sample):
         
         if not len(self.memory) <1000 :
             a = time.time()
-            mini_sample, idxs, weights, sample_priorities, log_sample = self.memory.sample(self.batch_size) #sampling from memory
             vrijeme_sample = time.time()-a
             
 
@@ -273,7 +267,6 @@ class Agent_trainer:
             loss, td, Q_val =self.trainer.train_step(game_states, actions, rewards, next_game_states, dones,gamma_train, weights) # giving all the data to the trainer to handle training
 
             a = time.time()
-            self.memory.update_priorities(idxs, td, sample_priorities) # updating priorities if priority sampler is used
             vrijeme_update_priorities = time.time()-a
 
 
@@ -297,7 +290,8 @@ class Agent_trainer:
                 self.advanced_logger(log_train, log_sample,self.n_games,lr )
             # end of logging
 
-            return loss # returning loss to user for quick sainity checks
+            return loss , idxs, td, sample_priorities # returning loss to user for quick sainity checks
+                                                        # returning idxs,ts, sample_priorities to update priorities
         return 0
 
     def episode_count(self, metadata_states):
