@@ -44,6 +44,8 @@ def main():
                     agent1 = snakeAgent(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, 
                                         advanced_logging_path=file_name, polyak = polyak )
                     
+                    brojac = 0
+                    ukupno_vrijeme = time.time()
                     num_games = 7500
                     avg_count = 10
                     avg_reward = 0
@@ -89,17 +91,23 @@ def main():
                             done = done_novi
                             reward = reward_novi
                             jabuka = jabuka_novi
-
+                            brojac += 1
+                            if brojac%10_000 == 0:
+                                print(f"  time={(time.time() - ukupno_vrijeme)*1000:.2f} ")
+                                fetch_time = 0.0
 
                             sum_reward += reward
                         if(game_no%1000 == 0):
                             agent1.save_agent_state(f"{file_name}.pt")
+
+                        
                         
                         avg_count = 0.99*avg_count + 0.01*count
                         avg_reward = 0.99*avg_reward + 0.01*sum_reward/count
                         avg_jabuka = 0.99*avg_jabuka + 0.01*jabuka
                         form = '{:.4f}'
-                        print(form.format(game_no), form.format(count),  form.format(avg_count), form.format(sum_reward/count), form.format(avg_reward), form.format(jabuka), form.format(avg_jabuka)) 
+                        if game_no % 20 == 0:
+                            print(form.format(game_no), form.format(count),  form.format(avg_count), form.format(sum_reward/count), form.format(avg_reward), form.format(jabuka), form.format(avg_jabuka), f"br treninga = {brojac}") 
                         vrijeme= time.time()  - a
                         
                         logger.log({

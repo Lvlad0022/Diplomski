@@ -37,7 +37,7 @@ class Agent_inference:
     to use the class you need to define a knew subclass with functions as per specifications stated in the example 
     """ 
     def __init__(self, model,  possible_actions , on_gpu = False,
-                 n_step_remember=1, gamma=0.93, train = True, noisy_net = False):
+                 n_step_remember=1, gamma=0.93, train = True, noisy_net = True):
         
         self.on_gpu = on_gpu
         self.possible_actions = possible_actions #a dictionary of possible actions for different problems
@@ -77,10 +77,11 @@ class Agent_inference:
         if noisynet:
             self.model.is_training = training
 
-    def load_model_state_dict(self, state_dict, training=False, noisynet = False):
+    def load_model_state_dict(self, state_dict, training=None, noisynet = None):
         self.model.load_state_dict(state_dict)
-        self.is_training = training
-        if noisynet:
+        if training is not None:
+            self.is_training = training
+        if self.noisy_net:
             self.model.is_training = training
 
     def return_counter(self):

@@ -32,12 +32,12 @@ def main():
                     memory = TDPriorityReplayBuffer(capacity=200000)
                     brojac = 0
                     vrijeme_pocetak = time.time()
-                    br = 0
-                    num_games = 7500
+                    num_games = 10_000
                     avg_count = 10
                     avg_reward = 0
                     avg_jabuka = 0
-
+                    
+                    ukupno_vrijeme = time.time()
                     fetch_time = 0.0
                     for game_no in range(num_games):
                         # Create environment with human render mode
@@ -97,9 +97,8 @@ def main():
                                 samples, data_idxs, weights, sample_priorities, sample_log = batch
                                 loss , idxs, td_error, sample_priorities =agent_trainer.train(samples, data_idxs, weights, sample_priorities, sample_log)
                                 memory.update_priorities(data_idxs, td_error, sample_priorities)
-                                br += 1
-                                if br%50 == 0:
-                                    print(f"  time={(time.time() - vrijeme_pocetak)*1000:.2f}ms fetch_time={(fetch_time)*1000:.2f}ms lr={agent_trainer.get_current_lr():.6f} ")
+                                if brojac%10_000 == 0:
+                                    print(f"  time={(time.time() - ukupno_vrijeme)*1000:.2f} ")
                                     vrijeme_pocetak = time.time()
                                     fetch_time = 0.0
                                 if brojac % 10 == 0:
@@ -112,7 +111,8 @@ def main():
                         avg_reward = 0.99*avg_reward + 0.01*sum_reward/count
                         avg_jabuka = 0.99*avg_jabuka + 0.01*jabuka
                         form = '{:.4f}'
-                        #print(form.format(game_no), form.format(count),  form.format(avg_count), form.format(sum_reward/count), form.format(avg_reward), form.format(jabuka), form.format(avg_jabuka)) 
+                        if game_no % 20 == 0:
+                            print(form.format(game_no), form.format(count),  form.format(avg_count), form.format(sum_reward/count), form.format(avg_reward), form.format(jabuka), form.format(avg_jabuka), f"br treninga = {brojac}") 
                         vrijeme= time.time()  - a
                         
                         

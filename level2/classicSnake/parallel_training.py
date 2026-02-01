@@ -1,5 +1,7 @@
 import os, time, random, zmq, multiprocessing as mp, psutil
 from contextlib import closing
+from collections import deque
+import threading
 import numpy as np  
 from q_logic.q_logic_memory_classes import TDPriorityReplayBuffer
 from environment import SimpleSnakeEnv
@@ -8,18 +10,18 @@ from pathlib import Path
 from q_logic.q_logic import set_seed
 
 
-WORKERS        = 4
+WORKERS = 4
 COLLECTOR_PORT = 5555
-MEMORY_PORT    = 5556
-MODEL_SYNC_PORT = 5557  # New port for model broadcasting
+MEMORY_PORT = 5556
+MODEL_SYNC_PORT = 5557
 
 # -------------------------------------------------
-# Memory server - runs in its own process
+# Memory server - UNCHANGED
 # -------------------------------------------------
 def memory_server(capacity=200_000):
     """Dedicated process hosting the ExperienceMemory."""
     ctx = zmq.Context()
-    sock = ctx.socket(zmq.R)
+    sock = ctx.socket(zmq.REP)
     sock.bind(f"tcp://127.0.0.1:{MEMORY_PORT}")
     
     memory = TDPriorityReplayBuffer(capacity=capacity)
@@ -32,8 +34,6 @@ def memory_server(capacity=200_000):
             if cmd == "push":
                 exp, prio = args
                 num_visits, td_errors = memory.push(exp)
-  #              if num_visits is not None:
-   #                 print(f"(visits: {num_visits}, td_error: {td_errors:.4f})")
                 sock.send_pyobj("OK")
                 
             elif cmd == "sample":
@@ -41,8 +41,6 @@ def memory_server(capacity=200_000):
                 batch = None
                 if len(memory) > batch_size:
                     batch = memory.sample(batch_size)
-                else:
-                    print(f"cannot sample memory is {len(memory)}")
                 sock.send_pyobj(batch)
                 
             elif cmd == "update":
@@ -67,7 +65,7 @@ def memory_server(capacity=200_000):
 
 
 # -------------------------------------------------
-# Memory client - used by other processes
+# Memory client - Basic version
 # -------------------------------------------------
 class MemoryClient:
     """Client interface to the memory server."""
@@ -106,7 +104,73 @@ class MemoryClient:
 
 
 # -------------------------------------------------
-# Model broadcaster for trainer
+# Async batch prefetcher - FIXED with separate socket
+# -------------------------------------------------
+class AsyncBatchPrefetcher:
+    """Prefetches batches in background thread with its own socket."""
+    def __init__(self, batch_size, prefetch_count=2):
+        self.batch_size = batch_size
+        self.prefetch_count = prefetch_count
+        
+        self.queue = deque()
+        self.lock = threading.Lock()
+        self.active = True
+        
+        # Create separate socket for prefetching thread
+        self.ctx = zmq.Context()
+        self.sock = None
+        
+        self.thread = threading.Thread(target=self._prefetch_loop, daemon=True)
+        self.thread.start()
+    
+    def _prefetch_loop(self):
+        """Background thread with its own ZMQ socket."""
+        # Initialize socket in the thread
+        self.sock = self.ctx.socket(zmq.REQ)
+        self.sock.connect(f"tcp://127.0.0.1:{MEMORY_PORT}")
+        time.sleep(0.1)
+        
+        while self.active:
+            with self.lock:
+                queue_size = len(self.queue)
+            
+            if queue_size < self.prefetch_count:
+                try:
+                    # Use thread's own socket
+                    self.sock.send_pyobj(("sample", self.batch_size))
+                    batch = self.sock.recv_pyobj()
+                    
+                    if batch is not None:
+                        with self.lock:
+                            self.queue.append(batch)
+                except Exception as e:
+                    print(f"[Prefetcher] error: {e}")
+                    time.sleep(0.01)
+            else:
+                time.sleep(0.001)
+        
+        # Cleanup
+        self.sock.close()
+    
+    def get_batch(self):
+        """Get next batch (blocking if queue empty)."""
+        while self.active:
+            with self.lock:
+                if self.queue:
+                    return self.queue.popleft()
+            time.sleep(0.001)
+        return None
+    
+    def stop(self):
+        """Stop prefetching."""
+        self.active = False
+        if self.thread.is_alive():
+            self.thread.join(timeout=2)
+        self.ctx.term()
+
+
+# -------------------------------------------------
+# Model broadcaster - UNCHANGED
 # -------------------------------------------------
 class ModelBroadcaster:
     """Trainer uses this to broadcast model updates."""
@@ -114,15 +178,12 @@ class ModelBroadcaster:
         self.ctx = zmq.Context()
         self.sock = self.ctx.socket(zmq.PUB)
         self.sock.bind(f"tcp://127.0.0.1:{MODEL_SYNC_PORT}")
-        time.sleep(0.5)  # Let subscribers connect
+        time.sleep(0.5)
     
     def broadcast_model(self, model_state_dict):
-        """Send model state dict to all workers."""
         self.sock.send_pyobj(("model_update", model_state_dict))
-        #print("[Broadcaster] Model update sent")
     
     def broadcast_shutdown(self):
-        """Signal workers to stop."""
         self.sock.send_pyobj(("shutdown", None))
     
     def close(self):
@@ -131,7 +192,7 @@ class ModelBroadcaster:
 
 
 # -------------------------------------------------
-# Model subscriber for workers
+# Model subscriber - UNCHANGED
 # -------------------------------------------------
 class ModelSubscriber:
     """Workers use this to receive model updates."""
@@ -139,11 +200,10 @@ class ModelSubscriber:
         self.ctx = zmq.Context()
         self.sock = self.ctx.socket(zmq.SUB)
         self.sock.connect(f"tcp://127.0.0.1:{MODEL_SYNC_PORT}")
-        self.sock.setsockopt(zmq.SUBSCRIBE, b"")  # Subscribe to all messages
-        self.sock.setsockopt(zmq.RCVTIMEO, 1)  # 100ms timeout
+        self.sock.setsockopt(zmq.SUBSCRIBE, b"")
+        self.sock.setsockopt(zmq.RCVTIMEO, 1)
     
     def check_for_update(self):
-        """Non-blocking check for model update. Returns (cmd, data) or None."""
         try:
             return self.sock.recv_pyobj()
         except zmq.Again:
@@ -155,7 +215,7 @@ class ModelSubscriber:
 
 
 # -------------------------------------------------
-# Collector
+# Collector - UNCHANGED
 # -------------------------------------------------
 def collector():
     ctx = zmq.Context()
@@ -188,60 +248,84 @@ def collector():
 
 
 # -------------------------------------------------
-# Trainer
+# Trainer with async prefetching - FIXED
 # -------------------------------------------------
 def trainer(sync_every_k=10):
     print("[Trainer] started")
+    
+    # Separate client for priority updates
     mem_client = MemoryClient()
     broadcaster = ModelBroadcaster()
-    time.sleep(0.01)
+    
+    # Initialize prefetcher with its own connection
+    prefetcher = AsyncBatchPrefetcher(batch_size=64, prefetch_count=3)
+    time.sleep(0.5)
     
     set_seed(42)
     agent_trainer = snakeAgent_trainer()
-
     
     train_cycle = 0
     vrijeme_pocetak = time.time()
     fetch_time = 0.0
+    train_time = 0.
+    update_time = 0.0
+    sync_time = 0.0
     br = 0
-    for _ in range(10000):  # Example: 100 training iterations
-
+    ukupno_vrijeme = time.time()
+    for _ in range(100_000):
         v = time.time()
-        batch = mem_client.sample(64)  # Larger batch for training
+        batch = prefetcher.get_batch()
         fetch_time += time.time() - v
         
-        if batch is not None:
-            br+=1
-            samples, data_idxs, weights, sample_priorities, sample_log = batch
-            loss , idxs, td_error, sample_priorities =agent_trainer.train(samples, data_idxs, weights, sample_priorities, sample_log)
-            mem_client.update_priorities(data_idxs, td_error, sample_priorities)
+        if batch is None:
+            break
             
-
-            if br%50 == 0:
-                print(f"[Trainer] cycle={train_cycle} batch-len={len(samples)} time={(time.time() - vrijeme_pocetak)*1000:.2f}ms fetch_time={(fetch_time)*1000:.2f}ms lr={agent_trainer.get_current_lr():.6f} loss={loss:.4f}")
-                vrijeme_pocetak = time.time()
-                fetch_time = 0.0
-            
-            train_cycle += 1
-            
-            # Sync model to workers every k cycles
-            if train_cycle % sync_every_k == 0:
-                # Get model state dict (depends on your agent implementation)
-                # model_state = agent.get_model_state_dict()
-                model_state =  agent_trainer.get_model_state_dict()
-                broadcaster.broadcast_model(model_state)
-                #print(f"[Trainer] Synced model at cycle {train_cycle}")
+        br += 1
+        samples, data_idxs, weights, sample_priorities, sample_log = batch
         
+        # Training
+        t = time.time()
+        loss, idxs, td_error, sample_priorities = agent_trainer.train(
+            samples, data_idxs, weights, sample_priorities, sample_log
+        )
+        train_time += time.time() - t
+        
+        # Priority update (using separate socket)
+        u = time.time()
+        mem_client.update_priorities(data_idxs, td_error, sample_priorities)
+        update_time += time.time() - u
+        
+        if br % 50 == 0:
+            total_time = (time.time() - vrijeme_pocetak) * 1000
+            print(f"[Trainer] cycle={train_cycle} batch={len(samples)} "
+                  f"total={total_time:.2f}ms fetch={fetch_time*1000:.2f}ms "
+                  f"train={train_time*1000:.2f}ms update={update_time*1000:.2f}ms "
+                  f"sync={sync_time*1000:.2f}ms "
+                  f"lr={agent_trainer.get_current_lr():.6f} loss={loss:.4f}")
+            vrijeme_pocetak = time.time()
+            fetch_time = 0.0
+            train_time = 0.0
+            update_time = 0.0
+            sync_time = 0.0
+        train_cycle += 1
+        
+
+        if train_cycle % sync_every_k == 0:
+            u = time.time()
+            model_state = agent_trainer.get_model_state_dict()
+            broadcaster.broadcast_model(model_state)
+            sync_time += time.time() - u
     
-    # Signal shutdown
+    prefetcher.stop()
     broadcaster.broadcast_shutdown()
+    print(f"[Trainer] total training time: {(time.time() - ukupno_vrijeme):.2f}s")
     print("[Trainer] finished")
     broadcaster.close()
     mem_client.close()
 
 
 # -------------------------------------------------
-# Worker
+# Worker - UNCHANGED
 # -------------------------------------------------
 def worker(wid):
     try:
@@ -258,24 +342,18 @@ def worker(wid):
         time.sleep(0.2)
 
         set_seed(100 + wid)
-        # Game logic
         env = SimpleSnakeEnv(size=10)
-        agent1 = snakeAgent_inference(train=False, noisy_net=True, on_gpu=False)
-        
-        current_dir = Path(__file__).parent
-        #file_name = "snakeagent1__polyakTrue_gamma0.99_doubleqTrue_priorityTrue_noisynetTruezero_survive_reward_ver0_2026-01-13_13-12-24.pt.pt"
-        #model_path = current_dir / "representative_models" / file_name
-        #agent1.load_model_state(model_path, noisynet=True, training=False)
+        NoisyNet = True
+        isTraining = True
+        agent1 = snakeAgent_inference(train=isTraining, noisy_net=NoisyNet, on_gpu=False)
 
         sum_jabuka = 0
         sum_koraka = 0
         vrijeme_pocetak = time.time()
         shutdown_received = False
         game_count = 0
+        
         while not shutdown_received:
-            if shutdown_received:
-                break
-            
             game_count += 1
             state, snake = env.reset()
             done = False
@@ -283,20 +361,16 @@ def worker(wid):
             jabuka = 0
             reward = 0
             jabuka_novi = 0
-
             
             while not done:
-                # Check for model updates (non-blocking)
-                
                 count += 1
                 
-                if count < 0:
-                    action = random.randint(0, 3)
+                
+                if isTraining and NoisyNet:
+                    action, ratios = agent1.get_action((state, snake, reward, jabuka, done))
                 else:
-                    action = agent1.get_action((state, snake, reward, jabuka, done))
-
-                if reward >= 0.5:
-                    jabuka_novi += 1
+                    action = agent1.get_action((state,state,reward,jabuka,done))
+                
 
                 state_novi, snake_state_novi, reward_novi, done_novi, info = env.step(action)
                 memory = agent1.remember(
@@ -304,21 +378,25 @@ def worker(wid):
                     (state_novi, snake_state_novi, reward_novi, jabuka_novi, done_novi)
                 )
 
-                state, snake, reward, jabuka, done = state_novi, snake_state_novi, reward_novi, jabuka_novi, done_novi
+                if reward >= 0.5:
+                    jabuka_novi += 1
+                if count > 500:
+                    done_novi = True
 
-                if isinstance(memory, list) :
+                state, snake, reward, jabuka, done = state_novi, snake_state_novi, reward_novi, jabuka_novi, done_novi
+                
+
+                if isinstance(memory, list):
                     for m in memory:
                         sock.send_pyobj((False, m))
                 else:
                     sock.send_pyobj((False, memory))
 
-            a = time.time()
             update = model_sub.check_for_update()
             if update:
                 cmd, data = update
                 if cmd == "model_update":
-                    agent1.load_model_state_dict(data, noisynet=True, training=False)
-                    #print(f"[Worker {wid}] update time: {time.time() - a:.4f}s")
+                    agent1.load_model_state_dict(data, noisynet=NoisyNet, training=isTraining)
                 elif cmd == "shutdown":
                     shutdown_received = True
                     break
@@ -326,21 +404,22 @@ def worker(wid):
             sum_jabuka += jabuka_novi
             sum_koraka += count
             if game_count % 500 == 0:
-                print(f"worker: {wid} igra {game_count} jabuka {sum_jabuka/500} koraka {sum_koraka/500} vrijeme {time.time()-vrijeme_pocetak:.2f}s")
+                print(f"worker: {wid} igra {game_count} jabuka {sum_jabuka/500} "
+                      f"koraka {sum_koraka/500} vrijeme {time.time()-vrijeme_pocetak:.2f}s")
                 vrijeme_pocetak = time.time()
                 sum_jabuka = 0
                 sum_koraka = 0
+                
         sock.send_pyobj((True, 1))
         model_sub.close()
 
 
 # -------------------------------------------------
-# Main
+# Main - UNCHANGED
 # -------------------------------------------------
 if __name__ == "__main__":
     mp.set_start_method("spawn", force=True)
 
-    # Start memory server first
     mem_proc = mp.Process(target=memory_server, args=(200_000,), daemon=False)
     mem_proc.start()
     time.sleep(0.5)
@@ -365,19 +444,8 @@ if __name__ == "__main__":
                 p.terminate()
                 p.join(timeout=1)
 
-    # Shutdown memory server
     client = MemoryClient()
     final_size = client.shutdown()
     mem_proc.join(timeout=2)
     
     print(f"\nAll done. Memory size: {final_size}")
-
-
-
-
-
-
-
-
-
-    # trebam promjeniti arhitekturu, trainer 1/2 vremena potroši na komunikaciju sa memorijom
