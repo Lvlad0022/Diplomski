@@ -207,7 +207,7 @@ class ExperienceMemory:
                 self.priorities.add(init_p**self.alpha,self.counter)
 
         self.counter = (self.counter+1) % self.capacity
-        return (num_visits, td_error_mean)
+        return (num_visits, td_error_mean) # ovo je za provjeru koliko se puta svako sjecanje iskoristilo i koji je bio prosjecni td error za to sjecanje
     
     def update_priorities(self, data_idxs, td, priorities):
         # logging
@@ -249,6 +249,14 @@ class ExperienceMemory:
         self.update_beta()
 
         return samples, data_idxs, weights, sample_priorities, sample_log
+    """
+    samples su sjecanja koja se dobiju iz memorije
+    data_idxs su indeksi tih sjecanja u memoriji, oni se koriste za update prioriteta
+    weights su tezine koje se koriste pri racunanju gubitka
+    sample_priorities su prioriteti tih sjecanja oni se koriste za update prioriteta
+    sample_log su dodatne informacije koje mogu biti korisne za logiranje
+    to je tuple (broj posjeta, tezine, prioriteti, trenutna velicina memorije)
+    """
 
     def __len__(self):
         return len(self.memory)

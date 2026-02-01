@@ -24,7 +24,7 @@ def main():
         for double_q in [True]:
             for priority in [True]:
                 for noisyNet in [True]:
-                    gamma = 0.99
+                    gamma = 0.97
                     file_name = make_run_name(f"snakeagent1_residual_polyak{polyak}_gamma{gamma}_doubleq{double_q}_priority{priority}_noisynet{noisyNet}zero_survive_reward_ver{i}")
 
                     logger = CSVLogger(file_name, fieldnames=[
@@ -42,7 +42,7 @@ def main():
 
 
                     agent1 = snakeAgent(gamma= gamma, noisy_net=noisyNet, double_q=double_q, priority = priority, 
-                                        advanced_logging_path=file_name, polyak = polyak, attention=True )
+                                        advanced_logging_path=file_name, polyak = polyak )
                     
                     num_games = 7500
                     avg_count = 10

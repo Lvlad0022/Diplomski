@@ -77,6 +77,12 @@ class Agent_inference:
         if noisynet:
             self.model.is_training = training
 
+    def load_model_state_dict(self, state_dict, training=False, noisynet = False):
+        self.model.load_state_dict(state_dict)
+        self.is_training = training
+        if noisynet:
+            self.model.is_training = training
+
     def return_counter(self):
         return self.counter
 
@@ -121,7 +127,7 @@ class Agent_inference:
             self.rewards_average = (self.rewards_average - reward) / self.gamma
 
         
-        return out
+        return out # treba paziti ponekad je list pa onda na kraju 
 
 
     def episode_count(self, metadata_states):
@@ -191,7 +197,7 @@ class Agent_trainer:
     """
     def __init__(self, model, optimizer, possible_actions ,batch_size, criterion = huberLoss(), scheduler = False, 
                 train = True, advanced_logging_path= False, time_logging_path = False, double_q=True ,
-                gamma=0.93,memory = ReplayBuffer(), save_dir = "model_saves", polyak_update = True, noisy_net = False):
+                gamma=0.93, save_dir = "model_saves", polyak_update = True, noisy_net = False):
         
 
         self.save_dir = save_dir
@@ -222,6 +228,10 @@ class Agent_trainer:
         self.advanced_logger = Advanced_stat_logger(advanced_logging_path, 1000, self.batch_size) if advanced_logging_path else None
         self.time_logger =  Time_logger(time_logging_path) if time_logging_path else None
 
+    def get_model_state_dict(self):
+        return self.model.state_dict()
+    
+    
 
     def save_model_state(self, file_name='agent_state.pth', training = False):
         os.makedirs(self.save_dir, exist_ok=True)
@@ -240,6 +250,8 @@ class Agent_trainer:
         self.is_training = training
         if noisynet:
             self.model.is_training = training
+    
+    
 
 
     def return_counter(self):
@@ -247,52 +259,50 @@ class Agent_trainer:
     
     def train(self, mini_sample, idxs, weights, sample_priorities, log_sample):
         
-        if not len(self.memory) <1000 :
-            a = time.time()
-            vrijeme_sample = time.time()-a
-            
+        a = time.time()
+        vrijeme_sample = time.time()-a
+        
 
-            # Unpack the samples into separate lists
-            memory_states, actions, rewards, next_memory_states, dones,gamma_train = zip(*mini_sample)
+        # Unpack the samples into separate lists
+        memory_states, actions, rewards, next_memory_states, dones,gamma_train = zip(*mini_sample)
 
-            
-            game_states = self.stack_state_batch(self.memory_to_model(memory_states)) #from memory structure to train structure
-            actions = torch.tensor(np.array(actions), dtype=torch.long) 
-            rewards = torch.tensor(np.array(rewards), dtype=torch.float)
-            next_game_states = self.stack_state_batch(self.memory_to_model(next_memory_states))
-            dones = torch.tensor(np.array(dones), dtype=torch.bool) 
-            gamma_train = torch.tensor(np.array(gamma_train), dtype=torch.float)
-            weights = torch.tensor(np.array(weights), dtype=torch.float)
+        
+        game_states = self.stack_state_batch(self.memory_to_model(memory_states)) #from memory structure to train structure
+        actions = torch.tensor(np.array(actions), dtype=torch.long) 
+        rewards = torch.tensor(np.array(rewards), dtype=torch.float)
+        next_game_states = self.stack_state_batch(self.memory_to_model(next_memory_states))
+        dones = torch.tensor(np.array(dones), dtype=torch.bool) 
+        gamma_train = torch.tensor(np.array(gamma_train), dtype=torch.float)
+        weights = torch.tensor(np.array(weights), dtype=torch.float)
 
-            loss, td, Q_val =self.trainer.train_step(game_states, actions, rewards, next_game_states, dones,gamma_train, weights) # giving all the data to the trainer to handle training
+        loss, td_error, Q_val =self.trainer.train_step(game_states, actions, rewards, next_game_states, dones,gamma_train, weights) # giving all the data to the trainer to handle training
 
-            a = time.time()
-            vrijeme_update_priorities = time.time()-a
+        a = time.time()
+        vrijeme_update_priorities = time.time()-a
 
 
-            # advanced logging
-            a = time.time()
-            total_norm = 0.0
-            for p in self.model.parameters():
-                if p.grad is not None:
-                    param_norm = p.grad.data.norm(2)   # L2 gradient norm
-                    total_norm += param_norm.item() ** 2
-            total_norm = total_norm ** 0.5  
-            
-            log_train = (td, Q_val, self.episode_count(game_states), total_norm, loss)
-            vrijeme_logging = time.time()-a
+        # advanced logging
+        a = time.time()
+        total_norm = 0.0
+        for p in self.model.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)   # L2 gradient norm
+                total_norm += param_norm.item() ** 2
+        total_norm = total_norm ** 0.5  
+        
+        log_train = (td_error, Q_val, self.episode_count(game_states), total_norm, loss)
+        vrijeme_logging = time.time()-a
 
-            vremena_long_term = (vrijeme_sample,vrijeme_update_priorities,vrijeme_logging)
+        vremena_long_term = (vrijeme_sample,vrijeme_update_priorities,vrijeme_logging)
 
-            lr = self.trainer.optimizer.param_groups[0]["lr"]
+        lr = self.trainer.optimizer.param_groups[0]["lr"]
 
-            if self.advanced_logger is not None:
-                self.advanced_logger(log_train, log_sample,self.n_games,lr )
-            # end of logging
+        if self.advanced_logger is not None:
+            self.advanced_logger(log_train, log_sample,self.n_games,lr )
+        # end of logging
 
-            return loss , idxs, td, sample_priorities # returning loss to user for quick sainity checks
-                                                        # returning idxs,ts, sample_priorities to update priorities
-        return 0
+        return loss , idxs, td_error, sample_priorities # returning loss to user for quick sainity checks
+                                                    # returning idxs,ts, sample_priorities to update priorities
 
     def episode_count(self, metadata_states):
         return np.zeros((len(metadata_states),))
@@ -303,6 +313,9 @@ class Agent_trainer:
     def stack_state_batch(self, tuple_dict): # stacking torch tensors for training 
         keys = tuple_dict[0].keys()
         return {k: torch.stack([s[k] for s in tuple_dict], dim=0) for k in keys}
+    
+    def get_current_lr(self):
+        return self.trainer.optimizer.param_groups[0]["lr"]
 
 
 
