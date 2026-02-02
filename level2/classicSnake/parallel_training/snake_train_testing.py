@@ -1,4 +1,4 @@
-from paralell_training_agent import snakeAgent_inference, snakeAgent_trainer
+from Diplomski.level2.classicSnake.parallel_training.paralell_training_agent import snakeAgent_inference, snakeAgent_trainer
 from q_logic.q_logic_logging import make_run_name, CSVLogger
 from q_logic.q_logic_memory_classes import TDPriorityReplayBuffer
 import os

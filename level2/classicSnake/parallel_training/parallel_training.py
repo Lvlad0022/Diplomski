@@ -5,7 +5,7 @@ import threading
 import numpy as np  
 from q_logic.q_logic_memory_classes import TDPriorityReplayBuffer
 from environment import SimpleSnakeEnv
-from paralell_training_agent import snakeAgent_inference, snakeAgent_trainer
+from Diplomski.level2.classicSnake.parallel_training.paralell_training_agent import snakeAgent_inference, snakeAgent_trainer
 from pathlib import Path
 from q_logic.q_logic import set_seed
 

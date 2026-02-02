@@ -45,8 +45,7 @@ def main():
                                         advanced_logging_path=file_name, polyak = polyak )
                     
                     brojac = 0
-                    ukupno_vrijeme = time.time()
-                    num_games = 7500
+                    num_games = 15000
                     avg_count = 10
                     avg_reward = 0
                     avg_jabuka = 0
@@ -92,9 +91,6 @@ def main():
                             reward = reward_novi
                             jabuka = jabuka_novi
                             brojac += 1
-                            if brojac%10_000 == 0:
-                                print(f"  time={(time.time() - ukupno_vrijeme)*1000:.2f} ")
-                                fetch_time = 0.0
 
                             sum_reward += reward
                         if(game_no%1000 == 0):
