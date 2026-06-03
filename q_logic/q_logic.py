@@ -6,6 +6,7 @@ import time
 import traceback
 import copy
 import os
+from abc import ABC, abstractmethod
 
 import torch
 import torch.nn as nn
@@ -18,12 +19,12 @@ import torch.nn.functional as F
 
 from collections import deque
 from q_logic.loss_functions import huberLoss
-from q_logic.q_logic_memory_classes import ReplayBuffer
+from q_logic.q_logic_memory_classes import Experience, ReplayBuffer
 from q_logic.q_logic_logging import Advanced_stat_logger, Time_logger
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-class Agent:
+class Agent(ABC):
     """
     main DQN RL agent class
     it is used for exploration and training
@@ -36,7 +37,8 @@ class Agent:
     """
     def __init__(self, model, optimizer, possible_actions ,batch_size, criterion = huberLoss(), scheduler = False, 
                  train = True, advanced_logging_path= False, time_logging_path = False, double_q=True ,
-                 n_step_remember=1, gamma=0.93,memory = ReplayBuffer(), save_dir = "model_saves", polyak_update = True, noisy_net = False):
+                 n_step_remember=1, gamma=0.93,memory = ReplayBuffer(), save_dir = "model_saves", polyak_update = True, noisy_net = False,
+                 grad_clip_norm=1.0):
         
 
         self.save_dir = save_dir
@@ -74,7 +76,8 @@ class Agent:
 
         #q-trainer
         self.trainer = QTrainer(self.model, self.model_target, scheduler=scheduler,  noisy_net= noisy_net,
-                                double_q=double_q, criterion= criterion, optimizer=optimizer,gamma=gamma, polyak_update=polyak_update)
+                                double_q=double_q, criterion= criterion, optimizer=optimizer,gamma=gamma, polyak_update=polyak_update,
+                                grad_clip_norm=grad_clip_norm)
          
         # logging
         self.advanced_logger = Advanced_stat_logger(advanced_logging_path, 1000, self.batch_size) if advanced_logging_path else None
@@ -123,6 +126,42 @@ class Agent:
     def return_counter(self):
         return self.counter
 
+    @abstractmethod
+    def give_reward(self, data_novi, data, akcija):
+        """
+        Convert environment transition data into the reward signal used for training.
+
+        Must return:
+            reward: numeric scalar
+            done: bool indicating whether the episode ended after this transition
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_state(self, data):
+        """
+        Convert raw environment data into model inputs.
+
+        Must return a dict of torch tensors. The dict keys must match the model
+        forward arguments, for example {"x": tensor}.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_memory_state(self, data):
+        """
+        Convert raw environment data into the representation stored in replay memory.
+        This can be the same structure as get_state, or a smaller CPU-friendly form.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def memory_to_model(self, memory_state):
+        """
+        Convert replay-memory state batches back into structures accepted by the model.
+        """
+        raise NotImplementedError
+
     def remember(self, data, data_novi): # saving experience to memory
 
         memory_state = self.get_memory_state(data) #saving data in saving friendly format
@@ -143,7 +182,14 @@ class Agent:
             gamma_train = self.gamma ** (len(self.rewards))
             while not len(self.remember_data) == 0: # going through all saved memories, all of them will have no bootstrapped reward added
                 memory_state,action = self.remember_data.popleft()
-                experience = (memory_state, np.argmax(action), self.rewards_average, next_memory_state, done, gamma_train)
+                experience = Experience(
+                    state=memory_state,
+                    action=np.argmax(action),
+                    reward=self.rewards_average,
+                    next_state=next_memory_state,
+                    done=done,
+                    gamma=gamma_train,
+                )
                 experience_visits, experience_td_error = self.memory.push(experience)
 
                 if experience_visits is not None: #log handling, to see how many times ieach memory was visited
@@ -158,7 +204,14 @@ class Agent:
 
         elif len(self.rewards) == self.n_step_remember: # saving memories with next state for boostrapping
             memory_state, action = self.remember_data.popleft()
-            experience = (memory_state, np.argmax(action), self.rewards_average, next_memory_state, done, self.gamma**self.n_step_remember)
+            experience = Experience(
+                state=memory_state,
+                action=np.argmax(action),
+                reward=self.rewards_average,
+                next_state=next_memory_state,
+                done=done,
+                gamma=self.gamma**self.n_step_remember,
+            )
             experience_visits, experience_td_error  = self.memory.push(experience)
 
             if experience_visits is not None: #log handling
@@ -176,12 +229,16 @@ class Agent:
         
         if not len(self.memory) <1000 :
             a = time.time()
-            mini_sample, idxs, weights, sample_priorities, log_sample = self.memory.sample(self.batch_size) #sampling from memory
+            mini_sample, idxs, weights, old_priorities, log_sample = self.memory.sample(self.batch_size) #sampling from memory
             vrijeme_sample = time.time()-a
             
 
-            # Unpack the samples into separate lists
-            memory_states, actions, rewards, next_memory_states, dones,gamma_train = zip(*mini_sample)
+            memory_states = [experience.state for experience in mini_sample]
+            actions = [experience.action for experience in mini_sample]
+            rewards = [experience.reward for experience in mini_sample]
+            next_memory_states = [experience.next_state for experience in mini_sample]
+            dones = [experience.done for experience in mini_sample]
+            gamma_train = [experience.gamma for experience in mini_sample]
 
             
             game_states = self.stack_state_batch(self.memory_to_model(memory_states)) #from memory structure to train structure
@@ -195,7 +252,7 @@ class Agent:
             loss, td, Q_val =self.trainer.train_step(game_states, actions, rewards, next_game_states, dones,gamma_train, weights) # giving all the data to the trainer to handle training
 
             a = time.time()
-            self.memory.update_priorities(idxs, td, sample_priorities) # updating priorities if priority sampler is used
+            self.memory.update_priorities(idxs, td, old_priorities) # updating priorities if priority sampler is used
             vrijeme_update_priorities = time.time()-a
 
 
@@ -280,7 +337,8 @@ class QTrainer:
     """
     used to handle all the TD training
     """
-    def __init__(self, model,model_target,double_q=True, noisy_net = False, criterion = nn.MSELoss(), optimizer = None, scheduler = False, gamma=0.93, polyak_update = True):
+    def __init__(self, model,model_target,double_q=True, noisy_net = False, criterion = huberLoss(), optimizer = None, scheduler = False, gamma=0.93, polyak_update = True,
+                 grad_clip_norm=1.0):
 
         self.model = model
         self.model_target = model_target
@@ -300,6 +358,7 @@ class QTrainer:
 
         self.double_q = double_q
         self.noisy_net = noisy_net
+        self.grad_clip_norm = grad_clip_norm
 
     def train_step(self, game_state, action, reward, next_game_state, done, gamma_train,weights):
         self.model_target_update() #updating model traget wether it is polyak or regular step update
@@ -330,10 +389,11 @@ class QTrainer:
 
 
         
-        loss = F.mse_loss(pred_a, target_a) # calculate td loss and back propafate
+        loss = self.criterion(pred_a, target_a.detach(), weights) # calculate weighted td loss and back propagate
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
-        #torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+        if self.grad_clip_norm is not None:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip_norm)
         self.optimizer.step()
         if self.scheduler:
             self.scheduler.step()

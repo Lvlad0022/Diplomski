@@ -39,33 +39,56 @@ class PriorityLoss(nn.Module):
 
 
 class huberLoss(nn.Module):
-    def __init__(self, reduction='mean'):
+    def __init__(self, reduction='mean', delta=1.0):
         super(huberLoss, self).__init__()
         self.reduction = reduction  # 'mean' ili 'sum'
+        self.delta = delta
 
     def forward(self, pred, target, weights = None):
         """
         Args:
-            pred (Tensor): model prediction, shape (batch_size, num_actions)
-            target (Tensor): target Q-values, shape (batch_size, num_actions)
-            priority (Tensor): weights / priorities, shape (batch_size,)
+            pred (Tensor): selected Q prediction, shape (batch_size,)
+            target (Tensor): target Q-values, shape (batch_size,)
+            weights (Tensor): optional replay weights, shape (batch_size,)
         Returns:
-            Tensor: scalar loss (weighted MSE)
+            Tensor: scalar weighted Huber loss
         """
 
-        td = target - pred  # bez weights!
-        td = torch.clamp(td, -1.0, 1.0)   
+        td = target - pred
         abs_td = td.abs()
+        delta = self.delta
 
-        huber = torch.where(abs_td < 1.0,
-                            0.5 * td.pow(2),
-                            abs_td - 0.5)
+        huber = torch.where(
+            abs_td <= delta,
+            0.5 * td.pow(2),
+            delta * (abs_td - 0.5 * delta),
+        )
 
         if weights is not None:
+            weights = weights.to(huber.device).view_as(huber)
             loss = (weights * huber).mean()
         else:
             loss = huber.mean()
         return loss
+
+
+class WeightedMSELoss(nn.Module):
+    def __init__(self, reduction='mean'):
+        super(WeightedMSELoss, self).__init__()
+        self.reduction = reduction
+
+    def forward(self, pred, target, weights=None):
+        loss_per_sample = (target - pred).pow(2)
+
+        if weights is not None:
+            weights = weights.to(loss_per_sample.device).view_as(loss_per_sample)
+            loss_per_sample = weights * loss_per_sample
+
+        if self.reduction == 'mean':
+            return loss_per_sample.mean()
+        if self.reduction == 'sum':
+            return loss_per_sample.sum()
+        return loss_per_sample
 
 
 

@@ -7,7 +7,7 @@ from math import cos
 from models import DQN, DQNnoisy, DQNnoisy2
 from q_logic.loss_functions import huberLoss
 from q_logic.q_logic_memory_classes import TDPriorityReplayBuffer, ReplayBuffer
-from q_logic.q_logic_schedulers import WarmupPeakDecayScheduler
+from q_logic.q_logic_schedulers import LinearDecayScheduler
 
 
 """
@@ -21,7 +21,7 @@ class userAgent(Agent): #inheriting from q_logic Agent
         model =DQNnoisy(is_training=True) if noisy_net else DQN()
          
         optimizer = optim.Adam(model.parameters(),lr=5e-4)
-        scheduler = WarmupPeakDecayScheduler(optimizer,max_lr=5e-4, final_lr=5e-6, initial_lr=5e-4, decay_steps= 500_000)
+        scheduler = LinearDecayScheduler(optimizer, max_lr=5e-4, final_lr=5e-6, initial_lr=5e-4, decay_steps=500_000)
 
         memory = ReplayBuffer() # memory needs to be from given memory options in q_logic_memory_classes
                                 # it is either uniform memory or td error priority

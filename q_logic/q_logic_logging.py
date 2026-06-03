@@ -1,4 +1,3 @@
-from torch.utils.tensorboard import SummaryWriter
 import csv
 import os
 import numpy as np
@@ -15,6 +14,10 @@ class CSVLogger:
         """
         self.filepath = filepath
         self.fieldnames = fieldnames
+
+        parent_dir = os.path.dirname(filepath)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
 
         # Create the file and write header if it doesn't exist
         if not os.path.exists(filepath):
@@ -46,8 +49,11 @@ def make_run_name(
 class Advanced_stat_logger:
     def __init__(self, filename, update_every, batch_size, log_dir="logs/advanced_stats"):
         self.filename = make_run_name(filename)
-        self.visits_npy = f"{self.filename}_visits.npy"
-        self.errors_npy = f"{self.filename}_errors.npy"
+        self.log_path = os.path.join(log_dir, self.filename)
+        os.makedirs(self.log_path, exist_ok=True)
+
+        self.visits_npy = os.path.join(self.log_path, "visits.npy")
+        self.errors_npy = os.path.join(self.log_path, "errors.npy")
         self.count = 0
         self.update_every = update_every
         self.batch_size = batch_size
@@ -71,7 +77,8 @@ class Advanced_stat_logger:
         self.td_errors_visits = np.zeros((250_000,))
 
         # --- TensorBoard writer ---
-        self.writer = SummaryWriter(log_dir=f"{log_dir}/{self.filename}")
+        from torch.utils.tensorboard import SummaryWriter
+        self.writer = SummaryWriter(log_dir=self.log_path)
 
 
     def remember_log(self, num_visits,td_errors, step):
@@ -180,7 +187,10 @@ class Advanced_stat_logger:
 class Time_logger:
     def __init__(self, filename, update_every=1000, log_dir="logs/time_logger"):
         self.filename = make_run_name(filename)
-        self.filename_csv = f"{self.filename}.csv"
+        self.log_path = os.path.join(log_dir, self.filename)
+        os.makedirs(self.log_path, exist_ok=True)
+
+        self.filename_csv = os.path.join(self.log_path, "times.csv")
         self.update_every = update_every
         self.count = 0
 
@@ -193,7 +203,8 @@ class Time_logger:
         self.backprop_times = np.zeros((update_every,))
 
         # --- TensorBoard ---
-        self.writer = SummaryWriter(log_dir=f"{log_dir}/{self.filename}")
+        from torch.utils.tensorboard import SummaryWriter
+        self.writer = SummaryWriter(log_dir=self.log_path)
 
         
     # ---------------------------------------------------------

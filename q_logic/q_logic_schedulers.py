@@ -132,13 +132,55 @@ class CosineAnealSchedulerWarmReset(CustomLRScheduler):
         else:
             progress = self.global_step / self.decay_steps
             cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
-            if ( self.global_step == self.decay_steps):
+            if self.global_step >= self.decay_steps:
                 self.max_lr *= self.reset_multiplier
-                self.global_step *= self.decay_step_multiplier 
-                self.global_step = (self.warmup_steps + self.peak_steps) # ovo sam novo dodao cini se zanimljivo
-            # Linear decay
+                self.decay_steps = int(self.decay_steps * self.decay_step_multiplier)
+                self.global_step = self.warmup_steps + self.peak_steps            # Linear decay
             
             lr = self.final_lr + (self.max_lr - self.final_lr) * cosine_decay # decay length
+
+        self.set_lr(lr)
+
+
+class CosineWarmupHoldDecayScheduler(CustomLRScheduler):
+    """
+    Jednostavni scheduler bez restarta:
+    warmup -> hold na peak LR -> cosine decay do final LR.
+    """
+    def __init__(
+        self,
+        optimizer,
+        warmup_steps=5_000,
+        hold_steps=5_000,
+        decay_steps=500_000,
+        initial_lr=1e-4,
+        max_lr=5e-4,
+        final_lr=1e-6,
+    ):
+        super().__init__(optimizer, initial_lr, final_lr, max_lr)
+
+        self.warmup_steps = warmup_steps
+        self.hold_steps = hold_steps
+        self.decay_steps = decay_steps
+        self.final_lr = final_lr
+        self.max_lr = max_lr
+        self.global_step = 0
+
+    def step(self):
+        self.global_step += 1
+
+        if self.global_step <= self.warmup_steps:
+            progress = self.global_step / self.warmup_steps
+            lr = self.initial_lr + (self.max_lr - self.initial_lr) * progress
+
+        elif self.global_step <= self.warmup_steps + self.hold_steps:
+            lr = self.max_lr
+
+        else:
+            decay_step = self.global_step - self.warmup_steps - self.hold_steps
+            progress = min(1.0, decay_step / self.decay_steps)
+            cosine_decay = 0.5 * (1 + math.cos(math.pi * progress))
+            lr = self.final_lr + (self.max_lr - self.final_lr) * cosine_decay
 
         self.set_lr(lr)
 

@@ -1,12 +1,11 @@
 import torch.optim as optim
 import torch
 import numpy as np
-from q_logic.q_logic_popravljeno import Agent
+from q_logic.q_logic import Agent
 
 from cartpole_model import cartpoleNN
 from q_logic.loss_functions import huberLoss
 from q_logic.q_logic_memory_classes import TDPriorityReplayBuffer, ReplayBuffer
-from q_logic.q_logic_schedulers import WarmupPeakDecayScheduler
 
 
 
