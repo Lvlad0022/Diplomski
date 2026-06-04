@@ -158,13 +158,20 @@ class NoisyLinear(nn.Module):
             y_sigma = F.linear(x, w_noisy, b_noisy)
             y = y_mu + y_sigma
         else:
-            y_sigma = 0
+            y_sigma = torch.zeros_like(y_mu)
             y = y_mu
 
         if return_ratio:
             eps = 1e-8
-            ratio = torch.abs(y_sigma) / (torch.abs(y_mu) + eps)
-            return y, ratio
+            y_sigma_l2 = torch.linalg.vector_norm(y_sigma.reshape(y_sigma.size(0), -1), dim=1)
+            y_mu_l2 = torch.linalg.vector_norm(y_mu.reshape(y_mu.size(0), -1), dim=1)
+            ratio = y_sigma_l2 / (y_mu_l2 + eps)
+            stats = {
+                "ratio_l2": ratio,
+                "y_sigma_l2": y_sigma_l2,
+                "y_mu_l2": y_mu_l2,
+            }
+            return y, stats
 
         return y
 

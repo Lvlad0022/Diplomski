@@ -58,11 +58,10 @@ class Agent(ABC):
 
         #memory
         self.memory = memory 
-        self.rewards_average = 0
         self.n_step_remember = n_step_remember
         self.last_action = None
-        self.rewards = deque(maxlen=n_step_remember)
-        self.remember_data = deque(maxlen=n_step_remember)
+        self.rewards = deque()
+        self.remember_data = deque()
 
         #modeli
         self.is_training = train
@@ -168,7 +167,6 @@ class Agent(ABC):
         self.remember_data.append((memory_state,self.last_action)) # saving states, used for N step remember
 
         reward,done = self.give_reward(data_novi = data_novi,data = data, akcija = self.last_action)
-        self.rewards_average +=  self.gamma ** len(self.rewards) * reward 
         self.rewards.append(reward) # saving rewards, used for N step remember
 
         next_memory_state = self.get_memory_state(data_novi)
@@ -178,52 +176,39 @@ class Agent(ABC):
 
         if done: # if the end of episode is reached
             self.n_games += 1
-
-            gamma_train = self.gamma ** (len(self.rewards))
             while not len(self.remember_data) == 0: # going through all saved memories, all of them will have no bootstrapped reward added
-                memory_state,action = self.remember_data.popleft()
-                experience = Experience(
-                    state=memory_state,
-                    action=np.argmax(action),
-                    reward=self.rewards_average,
-                    next_state=next_memory_state,
-                    done=done,
-                    gamma=gamma_train,
-                )
-                experience_visits, experience_td_error = self.memory.push(experience)
-
+                memory_state, action = self.remember_data.popleft()
+                experience_visits, experience_td_error = self._push_n_step_memory(memory_state, action, next_memory_state, done)
                 if experience_visits is not None: #log handling, to see how many times ieach memory was visited
                     num_visits.append(experience_visits)
                     td_error_means.append(experience_td_error)
 
-                gamma_train = gamma_train / self.gamma
-                reward = self.rewards.popleft()
-                self.rewards_average = (self.rewards_average - reward) / self.gamma
-            self.rewards_average = 0
-            
-
         elif len(self.rewards) == self.n_step_remember: # saving memories with next state for boostrapping
             memory_state, action = self.remember_data.popleft()
-            experience = Experience(
-                state=memory_state,
-                action=np.argmax(action),
-                reward=self.rewards_average,
-                next_state=next_memory_state,
-                done=done,
-                gamma=self.gamma**self.n_step_remember,
-            )
-            experience_visits, experience_td_error  = self.memory.push(experience)
-
+            experience_visits, experience_td_error  = self._push_n_step_memory(memory_state, action, next_memory_state, done)
             if experience_visits is not None: #log handling
                 num_visits.append(experience_visits)    
                 td_error_means.append(experience_td_error)        
-            
-            reward = self.rewards.popleft()
-            self.rewards_average = (self.rewards_average - reward) / self.gamma
-
+        
         if (self.advanced_logger is not None) and len(num_visits) >0:
             self.advanced_logger.remember_log(num_visits, td_error_means,self.n_games)
             
+    def _push_n_step_memory(self, memory_state, action, next_memory_state,done):
+        gamma_train = self.gamma ** (len(self.rewards))
+        reward_train = sum((self.gamma ** i) * reward for i, reward in enumerate(self.rewards))
+        self.rewards.popleft()
+
+        experience = Experience(
+            state=memory_state,
+            action=np.argmax(action),
+            reward=reward_train,
+            next_state=next_memory_state,
+            done=done,
+            gamma=gamma_train,
+        )
+        experience_visits, experience_td_error = self.memory.push(experience)
+        
+        return experience_visits, experience_td_error
 
     def train(self):
         

@@ -36,6 +36,13 @@ def main(
     priority_decay=0.995,
     td_mix=0.5,
     loss_type="huber",
+    scheduler_type="warm_restart",
+    scheduler_warmup_steps=5_000,
+    scheduler_hold_steps=5_000,
+    scheduler_decay_steps=500_000,
+    scheduler_initial_lr=1e-4,
+    scheduler_max_lr=5e-4,
+    scheduler_final_lr=1e-6,
 ):
     polyak = True
     save_dir = CURRENT_DIR / "model_saves"
@@ -47,7 +54,7 @@ def main(
         for double_q in [True]:
             for noisyNet in [True]:
                 gamma = 0.97
-                file_name = make_run_name(f"snakeagent1_{backbone_type}_{model_type}_replay{replay_buffer_type}_loss{loss_type}_polyak{polyak}_gamma{gamma}_doubleq{double_q}_noisynet{noisyNet}zero_survive_reward_ver{i}")
+                file_name = make_run_name(f"snakeagent1_{backbone_type}_{model_type}_replay{replay_buffer_type}_loss{loss_type}_scheduler{scheduler_type}_polyak{polyak}_gamma{gamma}_doubleq{double_q}_noisynet{noisyNet}zero_survive_reward_ver{i}")
 
                 logger = CSVLogger(str(log_dir / f"{file_name}.csv"), fieldnames=[
                         "game", "avg_count", "avg_reward","avg_jabuka","vrijeme" ])
@@ -56,14 +63,20 @@ def main(
                                     advanced_logging_path=file_name if advanced_logging else False, polyak = polyak,
                                     save_dir=str(save_dir), model_type=model_type, backbone_type=backbone_type,
                                     replay_buffer_type=replay_buffer_type, priority_decay=priority_decay, td_mix=td_mix,
-                                    loss_type=loss_type)
+                                    loss_type=loss_type, scheduler_type=scheduler_type,
+                                    scheduler_warmup_steps=scheduler_warmup_steps,
+                                    scheduler_hold_steps=scheduler_hold_steps,
+                                    scheduler_decay_steps=scheduler_decay_steps,
+                                    scheduler_initial_lr=scheduler_initial_lr,
+                                    scheduler_max_lr=scheduler_max_lr,
+                                    scheduler_final_lr=scheduler_final_lr)
                 effective_noisy_net = agent1.noisy_net
 
                 brojac = 0
                 avg_count = 10
                 avg_reward = 0
                 avg_jabuka = 0
-                print(f"Starting snake training: games={num_games}, save_every={save_every}, max_steps={max_steps}, replay_buffer={replay_buffer_type}, loss={loss_type}, priority_decay={priority_decay}, td_mix={td_mix}, noisy_net={effective_noisy_net}, backbone={backbone_type}, model_type={model_type}", flush=True)
+                print(f"Starting snake training: games={num_games}, save_every={save_every}, max_steps={max_steps}, replay_buffer={replay_buffer_type}, loss={loss_type}, scheduler={scheduler_type}, warmup={scheduler_warmup_steps}, hold={scheduler_hold_steps}, decay={scheduler_decay_steps}, initial_lr={scheduler_initial_lr}, max_lr={scheduler_max_lr}, final_lr={scheduler_final_lr}, priority_decay={priority_decay}, td_mix={td_mix}, noisy_net={effective_noisy_net}, backbone={backbone_type}, model_type={model_type}", flush=True)
                 for game_no in range(num_games):
                     # Create environment with human render mode
                     env = SimpleSnakeEnv(size = board_size)
@@ -147,6 +160,13 @@ if __name__ == "__main__":
     parser.add_argument("--priority-decay", type=float, default=0.995)
     parser.add_argument("--td-mix", type=float, default=0.5)
     parser.add_argument("--loss", choices=["huber", "mse"], default="huber")
+    parser.add_argument("--scheduler", choices=["warm_restart", "cosine_warmup_hold"], default="warm_restart")
+    parser.add_argument("--scheduler-warmup-steps", type=int, default=5_000)
+    parser.add_argument("--scheduler-hold-steps", type=int, default=5_000)
+    parser.add_argument("--scheduler-decay-steps", type=int, default=500_000)
+    parser.add_argument("--scheduler-initial-lr", type=float, default=1e-4)
+    parser.add_argument("--scheduler-max-lr", type=float, default=5e-4)
+    parser.add_argument("--scheduler-final-lr", type=float, default=1e-6)
     parser.add_argument("--backbone", choices=["classic", "resnext_snake"], default="classic")
     parser.add_argument(
         "--model-type",
@@ -172,4 +192,11 @@ if __name__ == "__main__":
         priority_decay=args.priority_decay,
         td_mix=args.td_mix,
         loss_type=args.loss,
+        scheduler_type=args.scheduler,
+        scheduler_warmup_steps=args.scheduler_warmup_steps,
+        scheduler_hold_steps=args.scheduler_hold_steps,
+        scheduler_decay_steps=args.scheduler_decay_steps,
+        scheduler_initial_lr=args.scheduler_initial_lr,
+        scheduler_max_lr=args.scheduler_max_lr,
+        scheduler_final_lr=args.scheduler_final_lr,
     )
